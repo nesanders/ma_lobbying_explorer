@@ -266,9 +266,13 @@
         <span class="sa-title"><a href="bills.html?id=${encodeURIComponent(b.bill_id)}&gc=${encodeURIComponent(b.general_court)}">${escHtml(b.bill_title)}</a></span>
       </div>`).join('') : '<p class="no-data">No similar bills found.</p>';
 
+    const displayTitle = (bill.bill_title && bill.bill_title.length > 300)
+      ? bill.bill_title.substring(0, 297) + '…'
+      : (bill.bill_title || billId);
+
     main.innerHTML = `
       <div class="breadcrumb"><a href="bills.html">← All bills</a></div>
-      <h1>${escHtml(bill.bill_title || billId)}</h1>
+      <h1>${escHtml(displayTitle)}</h1>
 
       <div class="external-links">
         <a class="ext-link-btn" href="${escHtml(malegUrl)}" target="_blank" rel="noopener">

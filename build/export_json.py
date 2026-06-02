@@ -96,16 +96,26 @@ def export_clusters(engine, out_dir: Path):
 
 
 def _load_scored_base(engine) -> pd.DataFrame:
-    """Load MA_Lobbying_Bills_Scored joined with cluster labels and passed status."""
+    """Load MA_Lobbying_Bills_Scored joined with cluster labels and passed status.
+
+    Uses MA_Legislature_Bills.title in preference to Scored.bill_title: the Scored
+    title comes from the SoS portal where a single lobbyist registration can cover
+    multiple bills, causing their titles to be concatenated into one long string.
+    """
     scored = pd.read_sql("""
-        SELECT s.bill_id, s.bill_number, s.general_court, s.bill_title,
+        SELECT s.bill_id, s.bill_number, s.general_court,
+               COALESCE(leg.title, s.bill_title) AS bill_title,
                s.env_relevance_score, s.is_environmental, s.cluster_id,
                c.label AS cluster_label,
-               l.passed
-        FROM MA_Lobbying_Bills_Scored s
+               leg.passed
+        FROM (SELECT DISTINCT bill_number, general_court, bill_id,
+                     bill_title, env_relevance_score, is_environmental, cluster_id
+              FROM MA_Lobbying_Bills_Scored) s
         LEFT JOIN MA_Bill_Cluster_Labels c ON s.cluster_id = c.cluster_id
-        LEFT JOIN MA_Legislature_Bills l
-               ON s.bill_id = l.bill_id AND s.general_court = l.general_court
+        LEFT JOIN (SELECT bill_id, general_court, title, passed
+                   FROM MA_Legislature_Bills
+                   GROUP BY bill_id, general_court) leg
+               ON s.bill_id = leg.bill_id AND s.general_court = leg.general_court
     """, engine)
     return scored
 
