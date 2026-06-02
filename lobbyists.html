@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lobbyists — MA Lobbying Explorer</title>
+  <meta name="description" content="Browse lobbying firms in the Massachusetts Legislature, with client counts, compensation, and environmental client data.">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header>
+  <a class="site-title" href="index.html">MA Lobbying Explorer</a>
+  <nav>
+    <a href="bills.html">Bills</a>
+    <a href="employers.html">Employers</a>
+    <a href="lobbyists.html" class="active">Lobbyists</a>
+  </nav>
+</header>
+
+<div class="attribution-bar">
+  Lobbying firm data from the <a href="https://www.sec.state.ma.us/LobbyistPublicSearch/" target="_blank" rel="noopener">MA Secretary of State Lobbyist Public Search ↗</a>.
+</div>
+
+<main id="main-content">
+  <div class="loading">Loading…</div>
+</main>
+
+<footer>
+  <div>
+    Data:
+    <a href="https://www.sec.state.ma.us/LobbyistPublicSearch/" target="_blank" rel="noopener">MA Secretary of State</a>
+    <span class="sep">·</span>
+    <a href="https://malegislature.gov" target="_blank" rel="noopener">MA General Court</a>
+  </div>
+  <div style="margin-top:0.4rem">
+    <a href="https://github.com/nesanders/ma_lobbying_explorer" target="_blank" rel="noopener">Source code</a>
+  </div>
+</footer>
+
+<script src="assets/app.js"></script>
+<script src="assets/charts.js"></script>
+<script>
+(function() {
+  const main = document.getElementById('main-content');
+
+  routePage(listView, 'name', detailView);
+
+  function listView() {
+    document.title = 'Lobbyists — MA Lobbying Explorer';
+    showLoading(main);
+
+    DATA.lobbyists.then(lobbyists => {
+      renderListView(lobbyists);
+    }).catch(err => {
+      showError(main, err.message);
+    });
+  }
+
+  function renderListView(lobbyists) {
+    const params = new URLSearchParams(location.search);
+    let filterText = params.get('q') || '';
+
+    main.innerHTML = `
+      <h1>Lobbying Firms</h1>
+      <div class="filter-bar">
+        <div class="filter-group wide">
+          <label for="f-text">Search</label>
+          <input type="text" id="f-text" placeholder="Firm name…" value="${escHtml(filterText)}">
+        </div>
+      </div>
+      <div id="table-container"></div>
+    `;
+
+    const columns = [
+      { key: 'entity_name', label: 'Firm', render: row => `<a href="lobbyists.html?name=${encodeURIComponent(row.entity_slug)}">${escHtml(row.entity_name)}</a>` },
+      { key: 'n_clients', label: 'Clients', className: 'num' },
+      { key: 'total_compensation', label: 'Total compensation', className: 'num', render: row => formatMoney(row.total_compensation) },
+      { key: 'years_active', label: 'Years active', className: 'num hide-sm', sortVal: row => (row.years_active || []).length, render: row => (row.years_active || []).length ? `${Math.min(...row.years_active)}–${Math.max(...row.years_active)}` : '—' },
+    ];
+
+    function applyFilters() {
+      let rows = lobbyists;
+      if (filterText) rows = fuzzyFilter(rows, filterText, ['entity_name']);
+      return rows;
+    }
+
+    function syncParams() {
+      const p = new URLSearchParams();
+      if (filterText) p.set('q', filterText);
+      history.replaceState(null, '', p.toString() ? '?' + p.toString() : location.pathname);
+    }
+
+    const container = document.getElementById('table-container');
+    const table = renderTable(container, columns, applyFilters(), {
+      defaultSortCol: 'total_compensation',
+      defaultSortDir: 'desc',
+    });
+
+    function onFilterChange() {
+      syncParams();
+      table.update(applyFilters());
+    }
+
+    let textTimer;
+    document.getElementById('f-text').addEventListener('input', e => {
+      clearTimeout(textTimer);
+      textTimer = setTimeout(() => { filterText = e.target.value; onFilterChange(); }, 250);
+    });
+
+  }
+
+  function detailView(params) {
+    const slug = params.get('name');
+    document.title = 'Lobbyist — MA Lobbying Explorer';
+    showLoading(main);
+
+    Promise.all([DATA.lobbyists, DATA.employers, getEdgesByEmployer()]).then(([lobbyists, employers, edgesByEmp]) => {
+      const entity = lobbyists.find(l => l.entity_slug === slug);
+      if (!entity) {
+        main.innerHTML = `<div class="breadcrumb"><a href="lobbyists.html">← All lobbyists</a></div><div class="error-state"><strong>Firm not found</strong>No record for "${escHtml(slug)}".</div>`;
+        return;
+      }
+      document.title = `${entity.entity_name} — MA Lobbying Explorer`;
+      renderDetailView(entity, employers, edgesByEmp || {});
+    }).catch(err => {
+      main.innerHTML = `
+        <div class="breadcrumb"><a href="lobbyists.html">← All lobbyists</a></div>
+        <div class="error-state"><strong>Data not yet available</strong>${escHtml(err.message)}</div>
+      `;
+    });
+  }
+
+  function renderDetailView(entity, allEmployers, edgesByEmp) {
+    const sosUrl = entity.sos_search_url || `https://www.sec.state.ma.us/LobbyistPublicSearch/Default.aspx?searchType=entity&entityName=${encodeURIComponent(entity.entity_name)}`;
+    const years = entity.years_active || [];
+    const yearRange = years.length ? `${Math.min(...years)}–${Math.max(...years)}` : '—';
+
+    const { clients, yearData } = buildClientData(entity.entity_slug, allEmployers, edgesByEmp);
+
+    main.innerHTML = `
+      <div class="breadcrumb"><a href="lobbyists.html">← All lobbyists</a></div>
+      <h1>${escHtml(entity.entity_name)}</h1>
+
+      <div class="external-links">
+        <a class="ext-link-btn" href="${escHtml(sosUrl)}" target="_blank" rel="noopener">
+          🔍 View on MA Secretary of State ↗
+        </a>
+      </div>
+
+      <div class="stats-bar">
+        <div class="stats-bar-item"><div class="sb-value">${entity.n_clients || 0}</div><div class="sb-label">Clients</div></div>
+        <div class="stats-bar-item"><div class="sb-value">${formatMoney(entity.total_compensation)}</div><div class="sb-label">Total compensation</div></div>
+        <div class="stats-bar-item"><div class="sb-value">${yearRange}</div><div class="sb-label">Years active</div></div>
+      </div>
+
+      ${Object.keys(yearData).length > 1 ? `
+        <div class="chart-wrap" style="height:200px">
+          <h3 style="margin-top:0">Compensation per year</h3>
+          <canvas id="comp-bar"></canvas>
+        </div>
+      ` : ''}
+
+      <h2>Clients</h2>
+      <div id="clients-table"></div>
+    `;
+
+    const clientColumns = [
+      { key: 'client_name', label: 'Employer', render: row => `<a href="employers.html?name=${encodeURIComponent(row.client_slug)}">${escHtml(row.client_name)}</a>` },
+      { key: 'n_bills', label: 'Bills', className: 'num' },
+      { key: 'years_together', label: 'Years together', className: 'num hide-sm', sortVal: row => row.years_together.length, render: row => row.years_together.length ? row.years_together.join(', ') : '—' },
+    ];
+
+    const clientsContainer = document.getElementById('clients-table');
+    if (clients.length) {
+      renderTable(clientsContainer, clientColumns, clients, { defaultSortCol: 'n_bills', defaultSortDir: 'desc' });
+    } else {
+      clientsContainer.innerHTML = '<p class="no-data">No client data available.</p>';
+    }
+
+    if (Object.keys(yearData).length > 1) {
+      const sortedYears = Object.keys(yearData).sort();
+      const compensations = sortedYears.map(y => yearData[y].compensation || 0);
+      renderBar('comp-bar', sortedYears, compensations, {
+        label: 'Compensation',
+        color: '#2563eb',
+        horizontal: false,
+        xFormat: v => formatMoney(v),
+        tooltipLabel: v => formatMoney(v),
+      });
+    }
+  }
+
+  function buildClientData(entitySlug, allEmployers, edgesByEmp) {
+    const clientMap = {};
+    const yearData = {};
+
+    Object.entries(edgesByEmp).forEach(([clientSlug, edges]) => {
+      const entityEdges = edges.filter(e => e.entity_slug === entitySlug);
+      if (!entityEdges.length) return;
+
+      const empRecord = allEmployers.find(e => e.client_slug === clientSlug);
+      if (!empRecord && !entityEdges[0]) return;
+
+      const clientName = empRecord ? empRecord.client_name : (entityEdges[0].client_name || clientSlug);
+      const yearsSet = new Set(entityEdges.map(e => e.year).filter(Boolean));
+
+      clientMap[clientSlug] = {
+        client_slug: clientSlug,
+        client_name: clientName,
+        n_bills: entityEdges.length,
+        years_together: [...yearsSet].sort(),
+      };
+
+      entityEdges.forEach(e => {
+        const y = e.year;
+        if (!y) return;
+        if (!yearData[y]) yearData[y] = { bills: 0, compensation: 0 };
+        yearData[y].bills++;
+      });
+    });
+
+    return { clients: Object.values(clientMap), yearData };
+  }
+})();
+</script>
+</body>
+</html>

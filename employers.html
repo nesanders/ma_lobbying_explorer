@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Employers — MA Lobbying Explorer</title>
+  <meta name="description" content="Browse lobbying employers in the Massachusetts Legislature, with spend, environmental focus, and position data.">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header>
+  <a class="site-title" href="index.html">MA Lobbying Explorer</a>
+  <nav>
+    <a href="bills.html">Bills</a>
+    <a href="employers.html" class="active">Employers</a>
+    <a href="lobbyists.html">Lobbyists</a>
+  </nav>
+</header>
+
+<div class="attribution-bar">
+  Employer data from the <a href="https://www.sec.state.ma.us/LobbyistPublicSearch/" target="_blank" rel="noopener">MA Secretary of State Lobbyist Public Search ↗</a>.
+</div>
+
+<main id="main-content">
+  <div class="loading">Loading…</div>
+</main>
+
+<footer>
+  <div>
+    Data:
+    <a href="https://www.sec.state.ma.us/LobbyistPublicSearch/" target="_blank" rel="noopener">MA Secretary of State</a>
+    <span class="sep">·</span>
+    <a href="https://malegislature.gov" target="_blank" rel="noopener">MA General Court</a>
+  </div>
+  <div style="margin-top:0.4rem">
+    <a href="https://github.com/nesanders/ma_lobbying_explorer" target="_blank" rel="noopener">Source code</a>
+  </div>
+</footer>
+
+<script src="assets/app.js"></script>
+<script src="assets/charts.js"></script>
+<script>
+(function() {
+  const main = document.getElementById('main-content');
+
+  routePage(listView, 'name', detailView);
+
+  function listView() {
+    document.title = 'Employers — MA Lobbying Explorer';
+    showLoading(main);
+
+    DATA.employers.then(emps => {
+      renderListView(emps);
+    }).catch(err => {
+      showError(main, err.message);
+    });
+  }
+
+  function renderListView(emps) {
+    const params = new URLSearchParams(location.search);
+    let filterText = params.get('q') || '';
+    let filterMinSpend = Number(params.get('ms') || 0);
+
+    main.innerHTML = `
+      <h1>Employers</h1>
+      <div class="filter-bar">
+        <div class="filter-group wide">
+          <label for="f-text">Search</label>
+          <input type="text" id="f-text" placeholder="Employer name…" value="${escHtml(filterText)}">
+        </div>
+        <div class="filter-group">
+          <label for="f-ms">Min spend</label>
+          <input type="number" id="f-ms" placeholder="0" value="${filterMinSpend}" min="0" step="10000">
+        </div>
+      </div>
+      <div class="chart-wrap">
+        <h3 style="margin-top:0">Total compensation vs. bills lobbied</h3>
+        <div class="scatter-container">
+          <canvas id="scatter-chart"></canvas>
+        </div>
+        <p style="font-size:0.8rem;color:var(--muted);margin-top:0.5rem">
+          X axis: total compensation (log scale). Y axis: total bills lobbied. Bubble size: √(n_bills). Click a point to view employer.
+        </p>
+      </div>
+      <div id="table-container"></div>
+    `;
+
+    const columns = [
+      { key: 'client_name', label: 'Employer', render: row => `<a href="employers.html?name=${encodeURIComponent(row.client_slug)}">${escHtml(row.client_name)}</a>` },
+      { key: 'n_bills_total', label: 'Total bills', className: 'num' },
+      { key: 'total_compensation', label: 'Total spend', className: 'num', render: row => formatMoney(row.total_compensation) },
+      { key: 'years_active', label: 'Years active', className: 'num hide-sm', sortVal: row => (row.years_active || []).length, render: row => (row.years_active || []).length ? `${Math.min(...row.years_active)}–${Math.max(...row.years_active)}` : '—' },
+    ];
+
+    function applyFilters() {
+      let rows = emps;
+      if (filterText) rows = fuzzyFilter(rows, filterText, ['client_name']);
+      if (filterMinSpend > 0) rows = rows.filter(e => (e.total_compensation || 0) >= filterMinSpend);
+      return rows;
+    }
+
+    function syncParams() {
+      const p = new URLSearchParams();
+      if (filterText) p.set('q', filterText);
+      if (filterMinSpend > 0) p.set('ms', filterMinSpend);
+      history.replaceState(null, '', p.toString() ? '?' + p.toString() : location.pathname);
+    }
+
+    const container = document.getElementById('table-container');
+    const table = renderTable(container, columns, applyFilters(), {
+      defaultSortCol: 'total_compensation',
+      defaultSortDir: 'desc',
+    });
+
+    function onFilterChange() {
+      syncParams();
+      const filtered = applyFilters();
+      table.update(filtered);
+      updateScatter(filtered);
+    }
+
+    let textTimer;
+    document.getElementById('f-text').addEventListener('input', e => {
+      clearTimeout(textTimer);
+      textTimer = setTimeout(() => { filterText = e.target.value; onFilterChange(); }, 250);
+    });
+
+    document.getElementById('f-ms').addEventListener('input', e => {
+      filterMinSpend = Number(e.target.value) || 0;
+      onFilterChange();
+    });
+
+    let scatterChart = null;
+
+    function updateScatter(rows) {
+      const data = rows
+        .filter(e => e.total_compensation > 0)
+        .map(e => ({
+          x: e.total_compensation,
+          y: e.n_bills_total || 0,
+          r: Math.max(3, Math.min(18, Math.sqrt(e.n_bills_total || 1) * 1.5)),
+          name: e.client_name,
+          slug: e.client_slug,
+        }));
+
+      if (scatterChart) {
+        scatterChart.then(chart => {
+          if (chart) {
+            chart.data.datasets[0].data = data;
+            chart.update();
+          }
+        });
+        return;
+      }
+
+      scatterChart = renderScatter('scatter-chart', data, {
+        xLabel: 'Total compensation',
+        yLabel: 'Bills lobbied',
+        tooltipLabel: pt => `${pt.name}: ${formatMoney(pt.x)}, ${pt.y} bills`,
+        onClick: (evt, elements, chart) => {
+          if (!elements.length) return;
+          const pt = chart.data.datasets[0].data[elements[0].index];
+          if (pt && pt.slug) window.location.href = `employers.html?name=${encodeURIComponent(pt.slug)}`;
+        },
+      });
+    }
+
+    updateScatter(applyFilters());
+  }
+
+  function detailView(params) {
+    const slug = params.get('name');
+    document.title = `Employer — MA Lobbying Explorer`;
+    showLoading(main);
+
+    Promise.all([DATA.employers, getEdgesByEmployer()]).then(([emps, edgesByEmp]) => {
+      const emp = emps.find(e => e.client_slug === slug);
+      if (!emp) {
+        main.innerHTML = `<div class="breadcrumb"><a href="employers.html">← All employers</a></div><div class="error-state"><strong>Employer not found</strong>No record for "${escHtml(slug)}".</div>`;
+        return;
+      }
+      document.title = `${emp.client_name} — MA Lobbying Explorer`;
+      const edges = edgesByEmp ? (edgesByEmp[slug] || []) : [];
+      renderDetailView(emp, edges, emps, edgesByEmp);
+    }).catch(err => {
+      main.innerHTML = `
+        <div class="breadcrumb"><a href="employers.html">← All employers</a></div>
+        <div class="error-state"><strong>Data not yet available</strong>${escHtml(err.message)}</div>
+      `;
+    });
+  }
+
+  function renderDetailView(emp, edges, allEmps, edgesByEmp) {
+    const sosUrl = emp.sos_search_url || `https://www.sec.state.ma.us/LobbyistPublicSearch/Default.aspx?searchType=employer&employerName=${encodeURIComponent(emp.client_name)}`;
+    const years = emp.years_active || [];
+    const yearRange = years.length ? `${Math.min(...years)}–${Math.max(...years)}` : '—';
+
+    const sortedEdges = [...edges].sort((a, b) => (b.year || 0) - (a.year || 0));
+
+    const opponents = computeOpponents(edges, edgesByEmp, emp.client_slug);
+
+    const yearData = buildYearData(edges);
+
+    main.innerHTML = `
+      <div class="breadcrumb"><a href="employers.html">← All employers</a></div>
+      <h1>${escHtml(emp.client_name)}</h1>
+
+      <div class="external-links">
+        <a class="ext-link-btn" href="${escHtml(sosUrl)}" target="_blank" rel="noopener">
+          🔍 View on MA Secretary of State ↗
+        </a>
+      </div>
+
+      <div class="stats-bar">
+        <div class="stats-bar-item"><div class="sb-value">${formatMoney(emp.total_compensation)}</div><div class="sb-label">Total spend</div></div>
+        <div class="stats-bar-item"><div class="sb-value">${emp.n_bills_total || 0}</div><div class="sb-label">Total bills</div></div>
+        <div class="stats-bar-item"><div class="sb-value">${yearRange}</div><div class="sb-label">Years active</div></div>
+      </div>
+
+      ${(emp.top_tags || []).length ? `
+        <div class="chart-wrap" style="height:${Math.max(120, (emp.top_tags.length * 30) + 40)}px">
+          <h3 style="margin-top:0">Top bill tags</h3>
+          <canvas id="tags-bar"></canvas>
+        </div>
+      ` : ''}
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1rem">
+        <div class="chart-wrap" style="height:220px">
+          <h3 style="margin-top:0">Position breakdown</h3>
+          <canvas id="pos-donut"></canvas>
+        </div>
+        <div class="chart-wrap" style="height:220px">
+          <h3 style="margin-top:0">Activity over time</h3>
+          <canvas id="timeline"></canvas>
+        </div>
+      </div>
+
+      ${opponents.length ? `
+        <h2>Most often on opposite sides</h2>
+        <p style="font-size:0.85rem;color:var(--muted);margin-bottom:0.5rem">Top employers who took opposite positions on the same bills</p>
+        <div class="table-wrap">
+          <table class="opponents-table">
+            <thead><tr><th>Opponent employer</th><th class="num">Bills in opposition</th></tr></thead>
+            <tbody>
+              ${opponents.slice(0, 5).map(o => `<tr>
+                <td><a href="employers.html?name=${encodeURIComponent(o.slug)}">${escHtml(o.name)}</a></td>
+                <td class="num">${o.count}</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      ` : ''}
+
+      <h2>Bills lobbied</h2>
+      <div id="bills-table"></div>
+    `;
+
+    function renderBillsTable(edgeList) {
+      const container = document.getElementById('bills-table');
+      const columns = [
+        {
+          key: 'bill_id',
+          label: 'Bill ID',
+          render: row => {
+            const detailUrl = `bills.html?id=${encodeURIComponent(row.bill_id)}&gc=${encodeURIComponent(row.general_court)}`;
+            const malegUrl = `https://malegislature.gov/Bills/${encodeURIComponent(row.general_court)}/${encodeURIComponent(row.bill_id)}`;
+            return `<a href="${escHtml(detailUrl)}">${escHtml(row.bill_id)}</a> <a href="${escHtml(malegUrl)}" class="ext" target="_blank" rel="noopener" title="malegislature.gov" style="font-size:0.8em">↗</a>`;
+          },
+        },
+        { key: 'bill_title', label: 'Title', className: 'truncate', render: row => escHtml(row.bill_title) },
+        { key: 'general_court', label: 'GC', render: row => `<span class="chip chip-gc">GC${row.general_court}</span>`, className: 'hide-sm' },
+        { key: 'year', label: 'Year', className: 'num' },
+        { key: 'position', label: 'Position', render: row => positionChip(row.position) },
+      ];
+      renderTable(container, columns, edgeList, { defaultSortCol: 'year', defaultSortDir: 'desc' });
+    }
+
+    renderBillsTable(sortedEdges);
+
+    if ((emp.top_tags || []).length) {
+      const tags = (emp.top_tags || []).slice(0, 8);
+      const counts = tags.map(() => 1);
+      renderBar('tags-bar', tags, counts, {
+        label: 'Tag count',
+        color: '#16a34a',
+        horizontal: true,
+        tooltipLabel: v => String(v),
+      });
+    }
+
+    renderPositionDonut('pos-donut', {
+      support: (emp.positions || {}).support || 0,
+      oppose:  (emp.positions || {}).oppose  || 0,
+      neutral: (emp.positions || {}).neutral || 0,
+      none:    (emp.positions || {}).none    || 0,
+    });
+
+    renderTimeline('timeline', yearData);
+  }
+
+  function buildYearData(edges) {
+    const data = {};
+    edges.forEach(e => {
+      const y = e.year;
+      if (!y) return;
+      if (!data[y]) data[y] = { bills: 0, compensation: 0 };
+      data[y].bills++;
+    });
+    return data;
+  }
+
+  function computeOpponents(myEdges, edgesByEmp, mySlug) {
+    const OPPOSE_POSITIONS = new Set(['Oppose']);
+    const SUPPORT_POSITIONS = new Set(['Support']);
+
+    const myBillPositions = {};
+    myEdges.forEach(e => {
+      const key = `${e.bill_id}_${e.general_court}`;
+      myBillPositions[key] = e.position;
+    });
+
+    const opponentCounts = {};
+
+    Object.entries(edgesByEmp || {}).forEach(([slug, edges]) => {
+      if (slug === mySlug) return;
+      edges.forEach(e => {
+        const key = `${e.bill_id}_${e.general_court}`;
+        if (!(key in myBillPositions)) return;
+        const myPos = myBillPositions[key];
+        const theirPos = e.position;
+        const isOpposed = (SUPPORT_POSITIONS.has(myPos) && OPPOSE_POSITIONS.has(theirPos)) ||
+                          (OPPOSE_POSITIONS.has(myPos) && SUPPORT_POSITIONS.has(theirPos));
+        if (!isOpposed) return;
+        if (!opponentCounts[slug]) opponentCounts[slug] = { name: '', count: 0, slug };
+        opponentCounts[slug].count++;
+        if (!opponentCounts[slug].name) opponentCounts[slug].name = e.client_name || slug;
+      });
+    });
+
+    return Object.values(opponentCounts)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+  }
+})();
+</script>
+</body>
+</html>

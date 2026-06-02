@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MA Lobbying Explorer</title>
+  <meta name="description" content="Browse Massachusetts Legislature lobbying disclosures, 2009–2026. Search bills, employers, and lobbying firms.">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<header>
+  <a class="site-title" href="index.html">MA Lobbying Explorer</a>
+  <nav>
+    <a href="bills.html">Bills</a>
+    <a href="employers.html">Employers</a>
+    <a href="lobbyists.html">Lobbyists</a>
+  </nav>
+</header>
+
+<div class="attribution-bar">
+  Data sourced from the <a href="https://www.sec.state.ma.us/LobbyistPublicSearch/" target="_blank" rel="noopener">MA Secretary of State Lobbyist Public Search ↗</a>
+  and the <a href="https://malegislature.gov" target="_blank" rel="noopener">MA General Court ↗</a>.
+  Processed by the <a href="https://github.com/nesanders/MAenvironmentaldata" target="_blank" rel="noopener">AMEND project ↗</a>.
+</div>
+
+<main>
+  <div class="hero">
+    <h1>MA Lobbying Explorer</h1>
+    <p>Browse Massachusetts Legislature lobbying disclosures, 2009–2026</p>
+  </div>
+
+  <div id="global-search-wrap" class="search-wrap">
+    <input type="text" id="global-search" placeholder="Search bills and employers…" autocomplete="off" aria-label="Search bills and employers">
+    <div id="search-dropdown" class="search-dropdown" hidden></div>
+  </div>
+
+  <div id="stats-section">
+    <div class="stat-grid" id="stat-grid">
+      <div class="stat-card"><div class="stat-value" id="s-bills">…</div><div class="stat-label">Total bills</div></div>
+      <div class="stat-card"><div class="stat-value" id="s-employers">…</div><div class="stat-label">Employers</div></div>
+      <div class="stat-card"><div class="stat-value" id="s-sessions">…</div><div class="stat-label">Sessions covered</div></div>
+      <div class="stat-card"><div class="stat-value" id="s-spend">…</div><div class="stat-label">Total compensation</div></div>
+    </div>
+  </div>
+
+  <h2>Explore the data</h2>
+  <div class="nav-cards">
+    <a class="nav-card" href="bills.html">
+      <div class="nav-card-icon">📋</div>
+      <h3>Bills</h3>
+      <p>Browse all lobbied bills by session, cluster, position activity, and legislative outcome.</p>
+    </a>
+    <a class="nav-card" href="employers.html">
+      <div class="nav-card-icon">🏢</div>
+      <h3>Employers</h3>
+      <p>Explore lobbying clients — total spend, bills lobbied, and position patterns.</p>
+    </a>
+    <a class="nav-card" href="lobbyists.html">
+      <div class="nav-card-icon">🤝</div>
+      <h3>Lobbyists</h3>
+      <p>Search lobbying firms, their clients, and compensation history.</p>
+    </a>
+  </div>
+
+  <div id="data-unavailable" hidden>
+    <div class="error-state">
+      <strong>Data not yet available</strong>
+      The JSON data files have not been generated yet. Run <code>python build/export_json.py</code>
+      from the repository root to create them, then refresh this page.
+    </div>
+  </div>
+</main>
+
+<footer>
+  <div>
+    Data:
+    <a href="https://www.sec.state.ma.us/LobbyistPublicSearch/" target="_blank" rel="noopener">MA Secretary of State</a>
+    <span class="sep">·</span>
+    <a href="https://malegislature.gov" target="_blank" rel="noopener">MA General Court</a>
+  </div>
+  <div style="margin-top:0.4rem">
+    Source:
+    <a href="https://github.com/nesanders/MAenvironmentaldata" target="_blank" rel="noopener">AMEND project</a>
+    <span class="sep">·</span>
+    <a href="https://github.com/nesanders/ma_lobbying_explorer" target="_blank" rel="noopener">This site</a>
+  </div>
+  <div style="margin-top:0.4rem" id="footer-updated"></div>
+</footer>
+
+<script src="assets/app.js"></script>
+<script>
+(function() {
+  let billsList = null, employers = null;
+
+  function initStats(bills, emps) {
+    const totalBills = bills.length;
+    const totalEmployers = emps.length;
+    const sessions = [...new Set(bills.map(b => b.general_court))].sort();
+    const totalSpend = emps.reduce((acc, e) => acc + (e.total_compensation || 0), 0);
+    document.getElementById('s-bills').textContent = totalBills.toLocaleString();
+    document.getElementById('s-employers').textContent = totalEmployers.toLocaleString();
+    document.getElementById('s-sessions').textContent = sessions.length ? `GC${sessions[0]}–GC${sessions[sessions.length - 1]}` : '—';
+    document.getElementById('s-spend').textContent = formatMoney(totalSpend);
+  }
+
+  function buildSearchIndex(bills, emps) {
+    billsList = bills;
+    employers = emps;
+  }
+
+  const searchInput = document.getElementById('global-search');
+  const dropdown = document.getElementById('search-dropdown');
+
+  function showDropdown(bills, emps, query) {
+    const q = query.trim().toLowerCase();
+    if (!q) { dropdown.hidden = true; return; }
+    const billMatches = bills
+      .filter(b => (b.bill_title || '').toLowerCase().includes(q) || (b.bill_id || '').toLowerCase().includes(q))
+      .slice(0, 5);
+    const empMatches = emps
+      .filter(e => (e.client_name || '').toLowerCase().includes(q))
+      .slice(0, 5);
+
+    if (!billMatches.length && !empMatches.length) {
+      dropdown.innerHTML = '<div class="sd-empty">No results found</div>';
+      dropdown.hidden = false;
+      return;
+    }
+
+    let html = '';
+    if (billMatches.length) {
+      html += '<div class="sd-group">Bills</div>';
+      billMatches.forEach(b => {
+        const env = b.is_env_llm ? '<span class="env-dot">🌿</span>' : '';
+        html += `<div class="sd-item" data-href="bills.html?id=${encodeURIComponent(b.bill_id)}&gc=${encodeURIComponent(b.general_court)}">${env}<span>${escHtml(b.bill_id)} — ${escHtml(b.bill_title)}</span></div>`;
+      });
+    }
+    if (empMatches.length) {
+      html += '<div class="sd-group">Employers</div>';
+      empMatches.forEach(e => {
+        html += `<div class="sd-item" data-href="employers.html?name=${encodeURIComponent(e.client_slug)}">${escHtml(e.client_name)}</div>`;
+      });
+    }
+    dropdown.innerHTML = html;
+    dropdown.hidden = false;
+
+    dropdown.querySelectorAll('.sd-item').forEach(item => {
+      item.addEventListener('click', () => {
+        window.location.href = item.dataset.href;
+      });
+    });
+  }
+
+  let searchTimer = null;
+  searchInput.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => {
+      if (billsList && employers) showDropdown(billsList, employers, searchInput.value);
+    }, 150);
+  });
+
+  document.addEventListener('click', e => {
+    if (!e.target.closest('#global-search-wrap')) dropdown.hidden = true;
+  });
+
+  searchInput.addEventListener('keydown', e => {
+    if (e.key === 'Escape') dropdown.hidden = true;
+  });
+
+  Promise.all([DATA.billsList, DATA.employers]).then(([bills, emps]) => {
+    initStats(bills, emps);
+    buildSearchIndex(bills, emps);
+  }).catch(() => {
+    document.getElementById('data-unavailable').hidden = false;
+    document.getElementById('stat-grid').style.display = 'none';
+  });
+
+  fetch('data/last_updated.json').then(r => r.ok ? r.json() : null).then(d => {
+    if (d && d.date) {
+      document.getElementById('footer-updated').textContent = 'Data last updated: ' + d.date;
+    }
+  }).catch(() => {});
+})();
+</script>
+</body>
+</html>
