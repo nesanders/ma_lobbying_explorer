@@ -243,7 +243,7 @@ function renderTimeline(canvasId, yearData, opts = {}) {
         maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
         plugins: {
-          legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
+          legend: { position: 'top', align: 'end', labels: { boxWidth: 12, font: { size: 11 } } },
           tooltip: {
             callbacks: {
               label: ctx => {

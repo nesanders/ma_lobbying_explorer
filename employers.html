@@ -203,7 +203,7 @@
 
     const opponents = computeOpponents(edges, edgesByEmp, emp.client_slug);
 
-    const yearData = buildYearData(edges);
+    const yearData = buildYearData(edges, emp.compensation_by_year || {});
 
     main.innerHTML = `
       <div class="breadcrumb"><a href="employers.html">← All employers</a></div>
@@ -233,7 +233,7 @@
           <h3 style="margin-top:0">Position breakdown</h3>
           <canvas id="pos-donut"></canvas>
         </div>
-        <div class="chart-wrap" style="height:220px">
+        <div class="chart-wrap" style="height:260px">
           <h3 style="margin-top:0">Activity over time</h3>
           <canvas id="timeline"></canvas>
         </div>
@@ -246,7 +246,7 @@
           <table class="opponents-table">
             <thead><tr><th>Opponent employer</th><th class="num">Bills in opposition</th></tr></thead>
             <tbody>
-              ${opponents.slice(0, 5).map(o => `<tr>
+              ${opponents.slice(0, 20).map(o => `<tr>
                 <td><a href="employers.html?name=${encodeURIComponent(o.slug)}">${escHtml(o.name)}</a></td>
                 <td class="num">${o.count}</td>
               </tr>`).join('')}
@@ -304,13 +304,17 @@
     renderTimeline('timeline', yearData);
   }
 
-  function buildYearData(edges) {
+  function buildYearData(edges, compByYear = {}) {
     const data = {};
     edges.forEach(e => {
       const y = e.year;
       if (!y) return;
       if (!data[y]) data[y] = { bills: 0, compensation: 0 };
       data[y].bills++;
+    });
+    Object.entries(compByYear).forEach(([y, c]) => {
+      if (!data[y]) data[y] = { bills: 0, compensation: 0 };
+      data[y].compensation = c;
     });
     return data;
   }

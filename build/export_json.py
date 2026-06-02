@@ -230,7 +230,8 @@ def _load_lobbying_bills_with_ids(engine) -> pd.DataFrame:
                lb.bill_number, lb.bill_title, lb.position, lb.amount,
                s.bill_id
         FROM MA_Lobbying_Bills lb
-        LEFT JOIN MA_Lobbying_Bills_Scored s
+        LEFT JOIN (SELECT DISTINCT bill_number, general_court, bill_id
+                   FROM MA_Lobbying_Bills_Scored) s
                ON lb.bill_number = s.bill_number AND lb.general_court = s.general_court
     """, engine)
     lb['position'] = lb['position'].fillna('No position')
@@ -295,6 +296,8 @@ def export_employers(engine, parquet_df: pd.DataFrame, out_dir: Path):
         total_comp = float(client_comp['compensation'].sum())
         env_frac = n_env / n_total if n_total > 0 else 0.0
         env_comp = round(total_comp * env_frac, 2)
+        comp_by_year = {int(y): round(float(v), 2)
+                        for y, v in client_comp.groupby('year')['compensation'].sum().items()}
 
         years = sorted(group['year'].dropna().astype(int).unique().tolist())
 
@@ -324,6 +327,7 @@ def export_employers(engine, parquet_df: pd.DataFrame, out_dir: Path):
             'years_active': years,
             'top_tags': top_tags,
             'positions': positions,
+            'compensation_by_year': comp_by_year,
             'sos_search_url': sos_employer_url(client_name),
         })
 
@@ -339,7 +343,8 @@ def export_lobbyists(engine, parquet_df: pd.DataFrame, out_dir: Path):
         SELECT lb.entity_name, lb.client_name, lb.year, lb.general_court, lb.bill_number,
                s.bill_id
         FROM MA_Lobbying_Bills lb
-        LEFT JOIN MA_Lobbying_Bills_Scored s
+        LEFT JOIN (SELECT DISTINCT bill_number, general_court, bill_id
+                   FROM MA_Lobbying_Bills_Scored) s
                ON lb.bill_number = s.bill_number AND lb.general_court = s.general_court
     """, engine)
     lb = lb.merge(env[['bill_id', 'general_court', 'is_env_llm']],
@@ -374,12 +379,13 @@ def export_edges_by_bill(engine, out_dir: Path):
     lb = pd.read_sql("""
         SELECT lb.entity_name, lb.client_name, lb.year, lb.general_court,
                lb.bill_number, lb.position,
-               COALESCE(s.bill_id, leg.bill_id) AS bill_id
+               COALESCE(s.bill_id, (SELECT bill_id FROM MA_Legislature_Bills l2
+                   WHERE l2.bill_number = lb.bill_number
+                     AND l2.general_court = lb.general_court LIMIT 1)) AS bill_id
         FROM MA_Lobbying_Bills lb
-        LEFT JOIN MA_Lobbying_Bills_Scored s
+        LEFT JOIN (SELECT DISTINCT bill_number, general_court, bill_id
+                   FROM MA_Lobbying_Bills_Scored) s
                ON lb.bill_number = s.bill_number AND lb.general_court = s.general_court
-        LEFT JOIN MA_Legislature_Bills leg
-               ON lb.bill_number = leg.bill_number AND lb.general_court = leg.general_court
     """, engine)
     lb = lb.where(pd.notnull(lb), None)
 
