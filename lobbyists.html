@@ -131,7 +131,7 @@
   }
 
   function renderDetailView(entity, allEmployers, edgesByEmp) {
-    const sosUrl = entity.sos_search_url || `https://www.sec.state.ma.us/LobbyistPublicSearch/Default.aspx?searchType=entity&entityName=${encodeURIComponent(entity.entity_name)}`;
+    const sosUrl = 'https://www.sec.state.ma.us/LobbyistPublicSearch/';
     const years = entity.years_active || [];
     const yearRange = years.length ? `${Math.min(...years)}–${Math.max(...years)}` : '—';
 
@@ -143,7 +143,7 @@
 
       <div class="external-links">
         <a class="ext-link-btn" href="${escHtml(sosUrl)}" target="_blank" rel="noopener">
-          🔍 View on MA Secretary of State ↗
+          🔍 Search MA Secretary of State ↗
         </a>
       </div>
 

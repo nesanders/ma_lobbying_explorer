@@ -45,16 +45,15 @@ def slugify(name: str) -> str:
     return re.sub(r'[^a-z0-9]+', '-', str(name).lower()).strip('-')
 
 
-def sos_employer_url(name: str) -> str:
-    from urllib.parse import urlencode
-    q = urlencode({'searchType': 'employer', 'employerName': name})
-    return f'https://www.sec.state.ma.us/LobbyistPublicSearch/Default.aspx?{q}'
+SOS_BASE = 'https://www.sec.state.ma.us/LobbyistPublicSearch/'
 
 
-def sos_entity_url(name: str) -> str:
-    from urllib.parse import urlencode
-    q = urlencode({'searchType': 'entity', 'entityName': name})
-    return f'https://www.sec.state.ma.us/LobbyistPublicSearch/Default.aspx?{q}'
+def sos_employer_url(_name: str) -> str:
+    return SOS_BASE
+
+
+def sos_entity_url(_name: str) -> str:
+    return SOS_BASE
 
 
 def _clean(obj):
@@ -374,10 +373,12 @@ def export_edges_by_bill(engine, out_dir: Path):
     lb = pd.read_sql("""
         SELECT lb.entity_name, lb.client_name, lb.year, lb.general_court,
                lb.bill_number, lb.position,
-               s.bill_id
+               COALESCE(s.bill_id, leg.bill_id) AS bill_id
         FROM MA_Lobbying_Bills lb
         LEFT JOIN MA_Lobbying_Bills_Scored s
                ON lb.bill_number = s.bill_number AND lb.general_court = s.general_court
+        LEFT JOIN MA_Legislature_Bills leg
+               ON lb.bill_number = leg.bill_number AND lb.general_court = leg.general_court
     """, engine)
     lb = lb.where(pd.notnull(lb), None)
 
@@ -408,10 +409,12 @@ def export_edges_by_employer(engine, parquet_df: pd.DataFrame, out_dir: Path):
     lb = pd.read_sql("""
         SELECT lb.client_name, lb.entity_name, lb.year, lb.general_court,
                lb.bill_number, lb.bill_title, lb.position,
-               s.bill_id
+               COALESCE(s.bill_id, leg.bill_id) AS bill_id
         FROM MA_Lobbying_Bills lb
         LEFT JOIN MA_Lobbying_Bills_Scored s
                ON lb.bill_number = s.bill_number AND lb.general_court = s.general_court
+        LEFT JOIN MA_Legislature_Bills leg
+               ON lb.bill_number = leg.bill_number AND lb.general_court = leg.general_court
     """, engine)
 
     env = _load_env_flags(engine, parquet_df)

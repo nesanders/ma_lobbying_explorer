@@ -164,7 +164,7 @@ h3 { font-size: 1rem; font-weight: 600; margin: 1rem 0 0.5rem; }
 }
 .nav-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.15); text-decoration: none; color: var(--text); }
 .nav-card:visited { color: var(--text); }
-.nav-card .nav-card-icon { font-size: 1.75rem; margin-bottom: 0.5rem; }
+.nav-card .nav-card-icon { font-size: 1.75rem; margin-bottom: 0.5rem; color: var(--link); }
 .nav-card h3 { margin: 0 0 0.25rem; font-size: 1.05rem; }
 .nav-card p { font-size: 0.85rem; color: var(--muted); margin: 0; }
 

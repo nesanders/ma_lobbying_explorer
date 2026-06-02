@@ -191,7 +191,7 @@
   }
 
   function renderDetailView(emp, edges, allEmps, edgesByEmp) {
-    const sosUrl = emp.sos_search_url || `https://www.sec.state.ma.us/LobbyistPublicSearch/Default.aspx?searchType=employer&employerName=${encodeURIComponent(emp.client_name)}`;
+    const sosUrl = 'https://www.sec.state.ma.us/LobbyistPublicSearch/';
     const years = emp.years_active || [];
     const yearRange = years.length ? `${Math.min(...years)}–${Math.max(...years)}` : '—';
 
@@ -207,7 +207,7 @@
 
       <div class="external-links">
         <a class="ext-link-btn" href="${escHtml(sosUrl)}" target="_blank" rel="noopener">
-          🔍 View on MA Secretary of State ↗
+          🔍 Search MA Secretary of State ↗
         </a>
       </div>
 
@@ -262,6 +262,7 @@
           key: 'bill_id',
           label: 'Bill ID',
           render: row => {
+            if (!row.bill_id) return `<span style="color:var(--muted);font-size:0.85em">#${row.bill_number || '?'}</span>`;
             const detailUrl = `bills.html?id=${encodeURIComponent(row.bill_id)}&gc=${encodeURIComponent(row.general_court)}`;
             const malegUrl = `https://malegislature.gov/Bills/${encodeURIComponent(row.general_court)}/${encodeURIComponent(row.bill_id)}`;
             return `<a href="${escHtml(detailUrl)}">${escHtml(row.bill_id)}</a> <a href="${escHtml(malegUrl)}" class="ext" target="_blank" rel="noopener" title="malegislature.gov" style="font-size:0.8em">↗</a>`;

@@ -50,7 +50,7 @@ function renderPositionBar(canvasId, { n_supporters = 0, n_opposers = 0, n_neutr
         responsive: true,
         maintainAspectRatio: false,
         plugins: {
-          legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
+          legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } },
           tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.raw}` } },
         },
         scales: {
