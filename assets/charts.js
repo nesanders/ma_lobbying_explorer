@@ -178,16 +178,25 @@ function renderBar(canvasId, labels, values, opts = {}) {
         scales: {
           x: {
             grid: { display: opts.horizontal !== false },
-            ticks: { callback: v => opts.xFormat ? opts.xFormat(v) : v },
+            ticks: {
+              callback: opts.horizontal !== false && opts.xFormat
+                ? v => opts.xFormat(v)
+                : function(val) {
+                    const label = this.getLabelForValue(val);
+                    return label && label.length > 28 ? label.substring(0, 26) + '…' : label;
+                  },
+            },
           },
           y: {
             grid: { display: opts.horizontal === false },
             ticks: {
               font: { size: 11 },
-              callback: function(val) {
-                const label = this.getLabelForValue(val);
-                return label && label.length > 28 ? label.substring(0, 26) + '…' : label;
-              },
+              callback: opts.horizontal === false && opts.xFormat
+                ? v => opts.xFormat(v)
+                : function(val) {
+                    const label = this.getLabelForValue(val);
+                    return label && label.length > 28 ? label.substring(0, 26) + '…' : label;
+                  },
             },
           },
         },

@@ -84,6 +84,10 @@ function positionChip(pos) {
   return `<span class="position-chip" style="background:${style.bg};color:${style.text}">${escHtml(normalized)}</span>`;
 }
 
+function slugify(name) {
+  return String(name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+
 function escHtml(str) {
   if (str == null) return '';
   return String(str)

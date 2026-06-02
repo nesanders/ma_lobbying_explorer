@@ -6,6 +6,7 @@
   <title>Employers — MA Lobbying Explorer</title>
   <meta name="description" content="Browse lobbying employers in the Massachusetts Legislature, with spend, environmental focus, and position data.">
   <link rel="stylesheet" href="assets/style.css">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%232563eb'/><text x='50%25' y='56%25' text-anchor='middle' dominant-baseline='middle' font-family='system-ui,sans-serif' font-size='13' font-weight='700' fill='white'>MA</text></svg>">
 </head>
 <body>
 <header>
@@ -86,7 +87,7 @@
     `;
 
     const columns = [
-      { key: 'client_name', label: 'Employer', render: row => `<a href="employers.html?name=${encodeURIComponent(row.client_slug)}">${escHtml(row.client_name)}</a>` },
+      { key: 'client_name', label: 'Employer', render: row => `<a href="employers.html?name=${encodeURIComponent(slugify(row.client_name))}">${escHtml(row.client_name)}</a>` },
       { key: 'n_bills_total', label: 'Total bills', className: 'num' },
       { key: 'total_compensation', label: 'Total spend', className: 'num', render: row => formatMoney(row.total_compensation) },
       { key: 'years_active', label: 'Years active', className: 'num hide-sm', sortVal: row => (row.years_active || []).length, render: row => (row.years_active || []).length ? `${Math.min(...row.years_active)}–${Math.max(...row.years_active)}` : '—' },
@@ -140,7 +141,7 @@
           y: e.n_bills_total || 0,
           r: Math.max(3, Math.min(18, Math.sqrt(e.n_bills_total || 1) * 1.5)),
           name: e.client_name,
-          slug: e.client_slug,
+          slug: slugify(e.client_name),
         }));
 
       if (scatterChart) {
@@ -173,7 +174,10 @@
     document.title = `Employer — MA Lobbying Explorer`;
     showLoading(main);
 
-    Promise.all([DATA.employers, getEdgesByEmployer()]).then(([emps, edgesByEmp]) => {
+    Promise.all([DATA.employers, DATA.billsList, getEdgesByEmployer()]).then(([emps, billsList, edgesByEmp]) => {
+      const billTitleLookup = Object.fromEntries(
+        billsList.map(b => [`${b.bill_id}_${b.general_court}`, b.bill_title])
+      );
       const emp = emps.find(e => e.client_slug === slug);
       if (!emp) {
         main.innerHTML = `<div class="breadcrumb"><a href="employers.html">← All employers</a></div><div class="error-state"><strong>Employer not found</strong>No record for "${escHtml(slug)}".</div>`;
@@ -181,7 +185,7 @@
       }
       document.title = `${emp.client_name} — MA Lobbying Explorer`;
       const edges = edgesByEmp ? (edgesByEmp[slug] || []) : [];
-      renderDetailView(emp, edges, emps, edgesByEmp);
+      renderDetailView(emp, edges, emps, edgesByEmp, billTitleLookup);
     }).catch(err => {
       main.innerHTML = `
         <div class="breadcrumb"><a href="employers.html">← All employers</a></div>
@@ -190,7 +194,7 @@
     });
   }
 
-  function renderDetailView(emp, edges, allEmps, edgesByEmp) {
+  function renderDetailView(emp, edges, allEmps, edgesByEmp, billTitleLookup = {}) {
     const sosUrl = 'https://www.sec.state.ma.us/LobbyistPublicSearch/';
     const years = emp.years_active || [];
     const yearRange = years.length ? `${Math.min(...years)}–${Math.max(...years)}` : '—';
@@ -268,7 +272,7 @@
             return `<a href="${escHtml(detailUrl)}">${escHtml(row.bill_id)}</a> <a href="${escHtml(malegUrl)}" class="ext" target="_blank" rel="noopener" title="malegislature.gov" style="font-size:0.8em">↗</a>`;
           },
         },
-        { key: 'bill_title', label: 'Title', className: 'truncate', render: row => escHtml(row.bill_title) },
+        { key: 'bill_title', label: 'Title', className: 'truncate', render: row => escHtml(billTitleLookup[`${row.bill_id}_${row.general_court}`] || row.bill_title || '') },
         { key: 'general_court', label: 'GC', render: row => `<span class="chip chip-gc">GC${row.general_court}</span>`, className: 'hide-sm' },
         { key: 'year', label: 'Year', className: 'num' },
         { key: 'position', label: 'Position', render: row => positionChip(row.position) },
@@ -279,8 +283,9 @@
     renderBillsTable(sortedEdges);
 
     if ((emp.top_tags || []).length) {
-      const tags = (emp.top_tags || []).slice(0, 8);
-      const counts = tags.map(() => 1);
+      const rawTags = (emp.top_tags || []).slice(0, 8);
+      const tags = rawTags.map(tc => Array.isArray(tc) ? tc[0] : tc);
+      const counts = rawTags.map(tc => Array.isArray(tc) ? tc[1] : 1);
       renderBar('tags-bar', tags, counts, {
         label: 'Tag count',
         color: '#16a34a',

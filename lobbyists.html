@@ -6,6 +6,7 @@
   <title>Lobbyists — MA Lobbying Explorer</title>
   <meta name="description" content="Browse lobbying firms in the Massachusetts Legislature, with client counts, compensation, and environmental client data.">
   <link rel="stylesheet" href="assets/style.css">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%232563eb'/><text x='50%25' y='56%25' text-anchor='middle' dominant-baseline='middle' font-family='system-ui,sans-serif' font-size='13' font-weight='700' fill='white'>MA</text></svg>">
 </head>
 <body>
 <header>
@@ -135,7 +136,8 @@
     const years = entity.years_active || [];
     const yearRange = years.length ? `${Math.min(...years)}–${Math.max(...years)}` : '—';
 
-    const { clients, yearData } = buildClientData(entity.entity_slug, allEmployers, edgesByEmp);
+    const { clients } = buildClientData(entity.entity_slug, allEmployers, edgesByEmp);
+    const compByYear = entity.compensation_by_year || {};
 
     main.innerHTML = `
       <div class="breadcrumb"><a href="lobbyists.html">← All lobbyists</a></div>
@@ -153,7 +155,7 @@
         <div class="stats-bar-item"><div class="sb-value">${yearRange}</div><div class="sb-label">Years active</div></div>
       </div>
 
-      ${Object.keys(yearData).length > 1 ? `
+      ${Object.keys(compByYear).length > 1 ? `
         <div class="chart-wrap" style="height:200px">
           <h3 style="margin-top:0">Compensation per year</h3>
           <canvas id="comp-bar"></canvas>
@@ -177,9 +179,9 @@
       clientsContainer.innerHTML = '<p class="no-data">No client data available.</p>';
     }
 
-    if (Object.keys(yearData).length > 1) {
-      const sortedYears = Object.keys(yearData).sort();
-      const compensations = sortedYears.map(y => yearData[y].compensation || 0);
+    if (Object.keys(compByYear).length > 1) {
+      const sortedYears = Object.keys(compByYear).sort();
+      const compensations = sortedYears.map(y => compByYear[y] || 0);
       renderBar('comp-bar', sortedYears, compensations, {
         label: 'Compensation',
         color: '#2563eb',
@@ -195,7 +197,7 @@
     const yearData = {};
 
     Object.entries(edgesByEmp).forEach(([clientSlug, edges]) => {
-      const entityEdges = edges.filter(e => e.entity_slug === entitySlug);
+      const entityEdges = edges.filter(e => slugify(e.entity_name || '') === entitySlug);
       if (!entityEdges.length) return;
 
       const empRecord = allEmployers.find(e => e.client_slug === clientSlug);

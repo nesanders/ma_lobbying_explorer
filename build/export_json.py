@@ -270,8 +270,8 @@ def export_employers(engine, parquet_df: pd.DataFrame, out_dir: Path):
 
     tag_map = {}
     if len(parquet_df) and 'tags' in parquet_df.columns:
-        env_par = parquet_df[parquet_df['is_env_llm'] == True][['bill_id', 'general_court', 'tags']].copy()
-        for _, row in env_par.iterrows():
+        tag_par = parquet_df[parquet_df['tags'].notna()][['bill_id', 'general_court', 'tags']].copy()
+        for _, row in tag_par.iterrows():
             key = (row['bill_id'], row['general_court'])
             t = row['tags']
             if isinstance(t, list):
@@ -308,10 +308,10 @@ def export_employers(engine, parquet_df: pd.DataFrame, out_dir: Path):
         }
 
         all_tags = []
-        for _, row in env_bills.iterrows():
+        for _, row in bills.iterrows():
             key = (row['bill_id'], row['general_court'])
             all_tags.extend(tag_map.get(key, []))
-        top_tags = [t for t, _ in Counter(all_tags).most_common(5)]
+        top_tags = [[t, c] for t, c in Counter(all_tags).most_common(5)]
 
         records.append({
             'client_name': client_name,
@@ -350,18 +350,19 @@ def export_lobbyists(engine, parquet_df: pd.DataFrame, out_dir: Path):
     for entity_name, group in lb.groupby('entity_name', sort=False):
         slug = slugify(entity_name)
         clients = group['client_name'].dropna().unique().tolist()
-        env_clients = group[group['is_env_llm']]['client_name'].dropna().unique().tolist()
         entity_comp = comp_df[comp_df['entity_name'] == entity_name]
         total_comp = float(entity_comp['compensation'].sum())
         years = sorted(group['year'].dropna().astype(int).unique().tolist())
+        comp_by_year = {int(y): round(float(v), 2)
+                        for y, v in entity_comp.groupby('year')['compensation'].sum().items()}
 
         records.append({
             'entity_name': entity_name,
             'entity_slug': slug,
             'n_clients': len(clients),
-            'n_env_clients': len(set(env_clients)),
             'total_compensation': round(total_comp, 2),
             'years_active': years,
+            'compensation_by_year': comp_by_year,
             'sos_search_url': sos_entity_url(entity_name),
         })
 
@@ -393,9 +394,7 @@ def export_edges_by_bill(engine, out_dir: Path):
             en = row['entity_name']
             recs.append({
                 'client_name': cn,
-                'client_slug': slugify(cn) if cn else None,
                 'entity_name': en,
-                'entity_slug': slugify(en) if en else None,
                 'year': int(row['year']) if row['year'] is not None else None,
                 'position': row['position'] or 'No position',
             })
@@ -404,23 +403,18 @@ def export_edges_by_bill(engine, out_dir: Path):
     write_json(out_dir / 'edges_by_bill.json', result, 'edges_by_bill')
 
 
-def export_edges_by_employer(engine, parquet_df: pd.DataFrame, out_dir: Path):
+def export_edges_by_employer(engine, out_dir: Path):
     print('Exporting edges_by_employer.json…')
     lb = pd.read_sql("""
         SELECT lb.client_name, lb.entity_name, lb.year, lb.general_court,
-               lb.bill_number, lb.bill_title, lb.position,
-               COALESCE(s.bill_id, leg.bill_id) AS bill_id
+               lb.bill_number, lb.position,
+               COALESCE(s.bill_id, (SELECT bill_id FROM MA_Legislature_Bills l2
+                   WHERE l2.bill_number = lb.bill_number
+                     AND l2.general_court = lb.general_court LIMIT 1)) AS bill_id
         FROM MA_Lobbying_Bills lb
         LEFT JOIN MA_Lobbying_Bills_Scored s
                ON lb.bill_number = s.bill_number AND lb.general_court = s.general_court
-        LEFT JOIN MA_Legislature_Bills leg
-               ON lb.bill_number = leg.bill_number AND lb.general_court = leg.general_court
     """, engine)
-
-    env = _load_env_flags(engine, parquet_df)
-    lb = lb.merge(env[['bill_id', 'general_court', 'is_env_llm']],
-                  on=['bill_id', 'general_court'], how='left')
-    lb['is_env_llm'] = lb['is_env_llm'].fillna(False).astype(bool)
     lb = lb.where(pd.notnull(lb), None)
 
     result = {}
@@ -434,12 +428,9 @@ def export_edges_by_employer(engine, parquet_df: pd.DataFrame, out_dir: Path):
             recs.append({
                 'bill_id': row['bill_id'],
                 'general_court': int(row['general_court']) if row['general_court'] is not None else None,
-                'bill_title': row['bill_title'],
                 'entity_name': en,
-                'entity_slug': slugify(en) if en else None,
                 'year': int(row['year']) if row['year'] is not None else None,
                 'position': row['position'] or 'No position',
-                'is_env_llm': bool(row['is_env_llm']),
             })
         result[slug] = recs
 
@@ -498,7 +489,7 @@ def main():
     export_employers(engine, parquet_df, out_dir)
     export_lobbyists(engine, parquet_df, out_dir)
     export_edges_by_bill(engine, out_dir)
-    export_edges_by_employer(engine, parquet_df, out_dir)
+    export_edges_by_employer(engine, out_dir)
 
     write_json(out_dir / 'last_updated.json', {'date': date.today().isoformat()}, 'last_updated')
     print('\nExport complete.')

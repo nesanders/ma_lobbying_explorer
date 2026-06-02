@@ -6,6 +6,7 @@
   <title>Bills — MA Lobbying Explorer</title>
   <meta name="description" content="Browse all lobbied bills in the Massachusetts Legislature, with filters by session, topic, and position activity.">
   <link rel="stylesheet" href="assets/style.css">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%232563eb'/><text x='50%25' y='56%25' text-anchor='middle' dominant-baseline='middle' font-family='system-ui,sans-serif' font-size='13' font-weight='700' fill='white'>MA</text></svg>">
 </head>
 <body>
 <header>
@@ -243,8 +244,8 @@
 
     const sortedEdges = [...edges].sort((a, b) => (b.year || 0) - (a.year || 0));
     const edgeRows = sortedEdges.map(e => {
-      const empLink = `<a href="employers.html?name=${encodeURIComponent(e.client_slug || '')}">${escHtml(e.client_name)}</a>`;
-      const firmLink = `<a href="lobbyists.html?name=${encodeURIComponent(e.entity_slug || '')}">${escHtml(e.entity_name)}</a>`;
+      const empLink = `<a href="employers.html?name=${encodeURIComponent(slugify(e.client_name || ''))}">${escHtml(e.client_name)}</a>`;
+      const firmLink = `<a href="lobbyists.html?name=${encodeURIComponent(slugify(e.entity_name || ''))}">${escHtml(e.entity_name)}</a>`;
       return `<tr>
         <td>${empLink}</td>
         <td>${firmLink}</td>
