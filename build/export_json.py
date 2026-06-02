@@ -104,7 +104,8 @@ def _load_scored_base(engine) -> pd.DataFrame:
     """
     scored = pd.read_sql("""
         SELECT s.bill_id, s.bill_number, s.general_court,
-               COALESCE(leg.title, s.bill_title) AS bill_title,
+               s.bill_title AS bill_title_raw,
+               leg.title AS leg_title,
                s.env_relevance_score, s.is_environmental, s.cluster_id,
                c.label AS cluster_label,
                leg.passed
@@ -117,6 +118,25 @@ def _load_scored_base(engine) -> pd.DataFrame:
                    GROUP BY bill_id, general_court) leg
                ON s.bill_id = leg.bill_id AND s.general_court = leg.general_court
     """, engine)
+
+    def _clean_title(raw, leg):
+        import re
+        if not raw or len(str(raw)) <= 300:
+            return raw or leg
+        # Multi-bill concatenated string — split on ; newline comma or space before a bill-ID
+        first = re.split(
+            r'[;\n\r\t]\s*'                 # semicolon or newline
+            r'|,\s+(?=[HS][BD]?\d)'         # comma before HB/SB
+            r'|\s+(?=[HS][BD]?\d{3,}\s)',   # space before 3+-digit bill number
+            str(raw)
+        )[0]
+        first = first.strip().lstrip('-').lstrip('\t').strip()
+        return first if len(first) > 10 else (leg or str(raw)[:300])
+
+    scored['bill_title'] = scored.apply(
+        lambda r: _clean_title(r['bill_title_raw'], r['leg_title']), axis=1
+    )
+    scored.drop(columns=['bill_title_raw', 'leg_title'], inplace=True)
     return scored
 
 

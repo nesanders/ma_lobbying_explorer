@@ -86,7 +86,7 @@
           <label for="f-cluster">Cluster</label>
           <select id="f-cluster">
             <option value="">All clusters</option>
-            ${clusterOptions.map(c => `<option value="${c.cluster_id}" ${filterCluster == c.cluster_id ? 'selected' : ''}>${escHtml(c.label)}</option>`).join('')}
+            ${clusterOptions.map(c => `<option value="${c.cluster_id}" ${filterCluster === String(c.cluster_id) ? 'selected' : ''}>${escHtml(c.label)}</option>`).join('')}
           </select>
         </div>
         <div class="filter-group">
@@ -137,7 +137,7 @@
       let rows = bills;
       if (filterText) rows = fuzzyFilter(rows, filterText, ['bill_title', 'bill_id']);
       if (filterGcs.length) rows = rows.filter(b => filterGcs.includes(b.general_court));
-      if (filterCluster) rows = rows.filter(b => String(b.cluster_id) === String(filterCluster));
+      if (filterCluster !== '') rows = rows.filter(b => String(b.cluster_id) === filterCluster);
       if (filterPosition === 'supporters') rows = rows.filter(b => (b.n_supporters || 0) > 0);
       else if (filterPosition === 'opposers') rows = rows.filter(b => (b.n_opposers || 0) > 0);
       else if (filterPosition === 'contested') rows = rows.filter(b => (b.n_supporters || 0) > 0 && (b.n_opposers || 0) > 0);
