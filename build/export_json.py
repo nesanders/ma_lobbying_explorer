@@ -98,46 +98,20 @@ def export_clusters(engine, out_dir: Path):
 def _load_scored_base(engine) -> pd.DataFrame:
     """Load MA_Lobbying_Bills_Scored joined with cluster labels and passed status.
 
-    Uses MA_Legislature_Bills.title in preference to Scored.bill_title: the Scored
-    title comes from the SoS portal where a single lobbyist registration can cover
-    multiple bills, causing their titles to be concatenated into one long string.
+    Joins to MA_Legislature_Bills on bill_id (clean 1:1 key) for passed status.
+    Duplicate (bill_number, general_court) rows and concatenated bill_titles have
+    been fixed upstream in the DB, so no workarounds are needed here.
     """
-    scored = pd.read_sql("""
-        SELECT s.bill_id, s.bill_number, s.general_court,
-               s.bill_title AS bill_title_raw,
-               leg.title AS leg_title,
+    return pd.read_sql("""
+        SELECT s.bill_id, s.bill_number, s.general_court, s.bill_title,
                s.env_relevance_score, s.is_environmental, s.cluster_id,
                c.label AS cluster_label,
-               leg.passed
-        FROM (SELECT DISTINCT bill_number, general_court, bill_id,
-                     bill_title, env_relevance_score, is_environmental, cluster_id
-              FROM MA_Lobbying_Bills_Scored) s
+               l.passed
+        FROM MA_Lobbying_Bills_Scored s
         LEFT JOIN MA_Bill_Cluster_Labels c ON s.cluster_id = c.cluster_id
-        LEFT JOIN (SELECT bill_id, general_court, title, passed
-                   FROM MA_Legislature_Bills
-                   GROUP BY bill_id, general_court) leg
-               ON s.bill_id = leg.bill_id AND s.general_court = leg.general_court
+        LEFT JOIN MA_Legislature_Bills l
+               ON s.bill_id = l.bill_id AND s.general_court = l.general_court
     """, engine)
-
-    def _clean_title(raw, leg):
-        import re
-        if not raw or len(str(raw)) <= 300:
-            return raw or leg
-        # Multi-bill concatenated string — split on ; newline comma or space before a bill-ID
-        first = re.split(
-            r'[;\n\r\t]\s*'                 # semicolon or newline
-            r'|,\s+(?=[HS][BD]?\d)'         # comma before HB/SB
-            r'|\s+(?=[HS][BD]?\d{3,}\s)',   # space before 3+-digit bill number
-            str(raw)
-        )[0]
-        first = first.strip().lstrip('-').lstrip('\t').strip()
-        return first if len(first) > 10 else (leg or str(raw)[:300])
-
-    scored['bill_title'] = scored.apply(
-        lambda r: _clean_title(r['bill_title_raw'], r['leg_title']), axis=1
-    )
-    scored.drop(columns=['bill_title_raw', 'leg_title'], inplace=True)
-    return scored
 
 
 def _load_position_counts(engine) -> pd.DataFrame:
@@ -260,8 +234,7 @@ def _load_lobbying_bills_with_ids(engine) -> pd.DataFrame:
                lb.bill_number, lb.bill_title, lb.position, lb.amount,
                s.bill_id
         FROM MA_Lobbying_Bills lb
-        LEFT JOIN (SELECT DISTINCT bill_number, general_court, bill_id
-                   FROM MA_Lobbying_Bills_Scored) s
+        LEFT JOIN MA_Lobbying_Bills_Scored s
                ON lb.bill_number = s.bill_number AND lb.general_court = s.general_court
     """, engine)
     lb['position'] = lb['position'].fillna('No position')
@@ -373,8 +346,7 @@ def export_lobbyists(engine, parquet_df: pd.DataFrame, out_dir: Path):
         SELECT lb.entity_name, lb.client_name, lb.year, lb.general_court, lb.bill_number,
                s.bill_id
         FROM MA_Lobbying_Bills lb
-        LEFT JOIN (SELECT DISTINCT bill_number, general_court, bill_id
-                   FROM MA_Lobbying_Bills_Scored) s
+        LEFT JOIN MA_Lobbying_Bills_Scored s
                ON lb.bill_number = s.bill_number AND lb.general_court = s.general_court
     """, engine)
     lb = lb.merge(env[['bill_id', 'general_court', 'is_env_llm']],
@@ -408,13 +380,9 @@ def export_edges_by_bill(engine, out_dir: Path):
     print('Exporting edges_by_bill.json…')
     lb = pd.read_sql("""
         SELECT lb.entity_name, lb.client_name, lb.year, lb.general_court,
-               lb.bill_number, lb.position,
-               COALESCE(s.bill_id, (SELECT bill_id FROM MA_Legislature_Bills l2
-                   WHERE l2.bill_number = lb.bill_number
-                     AND l2.general_court = lb.general_court LIMIT 1)) AS bill_id
+               lb.bill_number, lb.position, s.bill_id
         FROM MA_Lobbying_Bills lb
-        LEFT JOIN (SELECT DISTINCT bill_number, general_court, bill_id
-                   FROM MA_Lobbying_Bills_Scored) s
+        LEFT JOIN MA_Lobbying_Bills_Scored s
                ON lb.bill_number = s.bill_number AND lb.general_court = s.general_court
     """, engine)
     lb = lb.where(pd.notnull(lb), None)
@@ -443,10 +411,7 @@ def export_edges_by_employer(engine, out_dir: Path):
     print('Exporting edges_by_employer.json…')
     lb = pd.read_sql("""
         SELECT lb.client_name, lb.entity_name, lb.year, lb.general_court,
-               lb.bill_number, lb.position,
-               COALESCE(s.bill_id, (SELECT bill_id FROM MA_Legislature_Bills l2
-                   WHERE l2.bill_number = lb.bill_number
-                     AND l2.general_court = lb.general_court LIMIT 1)) AS bill_id
+               lb.bill_number, lb.position, s.bill_id
         FROM MA_Lobbying_Bills lb
         LEFT JOIN MA_Lobbying_Bills_Scored s
                ON lb.bill_number = s.bill_number AND lb.general_court = s.general_court
