@@ -74,7 +74,3 @@ data/               JSON data files (generated, not committed by default)
 Pure static site — no Node.js, no build step, no server required. All data is pre-built JSON loaded by the browser. Routing uses URL query parameters (`bills.html?id=H1234&gc=194`). All filtering runs client-side.
 
 Large files (`bills_detail.json`, `edges_by_bill.json`, `edges_by_employer.json`) are lazy-loaded on first use and cached in memory for the session.
-
-## License
-
-Not yet specified.
