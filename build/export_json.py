@@ -12,23 +12,27 @@ Run from repo root or build/:
   python build/export_json.py
   python build/export_json.py --db-path /path/to/AMEND.db --output-dir /path/to/data/
 
-Actual DB schema (as of 2026-06-01):
-  MA_Lobbying_Bills_Scored: bill_id, bill_number, general_court, bill_title, env_relevance_score,
-                            is_environmental, cluster_id
+DB schema (as of 2026-06-02):
   MA_Lobbying_Bills:        entity_name, client_name, year, general_court, chamber,
-                            bill_number, bill_title, position, amount
-                            (position values: 'Support', 'Oppose', 'Neutral', null)
+                            bill_number, bill_prefix, bill_id, bill_title, position, amount
+                            bill_id = bill_prefix + bill_number (NULL for non-standard chambers)
+                            position values: 'Support', 'Oppose', 'Neutral', null
+  MA_Lobbying_Bills_Scored: bill_id, bill_number, general_court, bill_title,
+                            env_relevance_score, is_environmental, cluster_id
+                            deduplicated on (bill_id, general_court)
   MA_Lobbying_Employers:    entity_name, client_name, year, reg_type, compensation
   MA_Legislature_Bills:     bill_id, bill_number, bill_prefix, general_court, title,
                             sponsor_name, status, passed
   MA_Bill_Cluster_Labels:   cluster_id, label, n_bills, n_env_bills
-  Parquet:                  bill_id, bill_number, general_court, is_env_llm,
-                            env_relevance_score, summary, categories, tags
+  Parquet:                  bill_id, general_court, is_env_llm, env_relevance_score,
+                            summary, categories, tags
+
+Join keys: always use (bill_id, general_court) — never bill_number alone,
+           since H and S bills in the same session share integer bill_numbers.
 """
 
 import argparse
 import json
-import os
 import re
 import sys
 from collections import Counter
@@ -36,7 +40,7 @@ from datetime import date
 from pathlib import Path
 
 import pandas as pd
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 
 SEP = (',', ':')
 
@@ -96,12 +100,7 @@ def export_clusters(engine, out_dir: Path):
 
 
 def _load_scored_base(engine) -> pd.DataFrame:
-    """Load MA_Lobbying_Bills_Scored joined with cluster labels and passed status.
-
-    Joins to MA_Legislature_Bills on bill_id (clean 1:1 key) for passed status.
-    Duplicate (bill_number, general_court) rows and concatenated bill_titles have
-    been fixed upstream in the DB, so no workarounds are needed here.
-    """
+    """Load MA_Lobbying_Bills_Scored joined with cluster labels and passed status."""
     return pd.read_sql("""
         SELECT s.bill_id, s.bill_number, s.general_court, s.bill_title,
                s.env_relevance_score, s.is_environmental, s.cluster_id,
@@ -114,34 +113,66 @@ def _load_scored_base(engine) -> pd.DataFrame:
     """, engine)
 
 
+def _load_unscored_stubs(engine) -> pd.DataFrame:
+    """Return stub rows for lobbied bills absent from MA_Lobbying_Bills_Scored.
+
+    These are bills recorded in the SoS lobbying data that were never run through
+    the AMEND scoring pipeline. They are shown without cluster, env score, or
+    summary but with correct title and passed status from MA_Legislature_Bills.
+    """
+    return pd.read_sql("""
+        SELECT DISTINCT
+            lb.bill_id,
+            CAST(REPLACE(REPLACE(lb.bill_id,'H',''),'S','') AS INTEGER) AS bill_number,
+            lb.general_court,
+            COALESCE(leg.title, lb.bill_title) AS bill_title,
+            leg.passed
+        FROM MA_Lobbying_Bills lb
+        LEFT JOIN MA_Lobbying_Bills_Scored s
+               ON lb.bill_id = s.bill_id AND lb.general_court = s.general_court
+        LEFT JOIN MA_Legislature_Bills leg
+               ON lb.bill_id = leg.bill_id AND lb.general_court = leg.general_court
+        WHERE lb.bill_id IS NOT NULL AND s.bill_id IS NULL
+    """, engine)
+
+
 def _load_position_counts(engine) -> pd.DataFrame:
-    """Count distinct client positions per bill (bill_number + general_court)."""
-    lb = pd.read_sql(
-        "SELECT bill_number, general_court, client_name, position FROM MA_Lobbying_Bills",
-        engine
-    )
-    # Deduplicate: one position per (client, bill) — keep the first occurrence
-    lb = lb.drop_duplicates(subset=['bill_number', 'general_court', 'client_name'])
+    """Count distinct client positions per bill, keyed by (bill_id, general_court).
+
+    Uses MA_Lobbying_Bills.bill_id directly (available since 2026-06-02 DB update).
+    Rows with NULL bill_id (non-standard chambers: Executive, FY items) are excluded.
+    """
+    lb = pd.read_sql("""
+        SELECT bill_id, general_court, client_name, position
+        FROM MA_Lobbying_Bills
+        WHERE bill_id IS NOT NULL
+    """, engine)
+    lb = lb.drop_duplicates(subset=['bill_id', 'general_court', 'client_name'])
 
     def count_pos(grp):
         pos = grp['position'].fillna('No position')
         c = pos.value_counts()
         return pd.Series({
-            'n_supporters': int(c.get('Support', 0)),
-            'n_opposers':   int(c.get('Oppose', 0)),
-            'n_neutrals':   int(c.get('Neutral', 0)),
+            'n_supporters':  int(c.get('Support', 0)),
+            'n_opposers':    int(c.get('Oppose', 0)),
+            'n_neutrals':    int(c.get('Neutral', 0)),
             'n_no_position': int(c.get('No position', 0)),
         })
 
-    counts = lb.groupby(['bill_number', 'general_court']).apply(count_pos).reset_index()
-    return counts
+    return lb.groupby(['bill_id', 'general_court']).apply(count_pos).reset_index()
 
 
 def export_bills_list(engine, parquet_df: pd.DataFrame, out_dir: Path) -> pd.DataFrame:
     print('Exporting bills_list.json…')
     scored = _load_scored_base(engine)
+    stubs = _load_unscored_stubs(engine)
+    # Add stub-only columns so concat works cleanly
+    for col in ['env_relevance_score', 'is_environmental', 'cluster_id', 'cluster_label']:
+        stubs[col] = None
+    scored = pd.concat([scored, stubs], ignore_index=True, sort=False)
+
     pos = _load_position_counts(engine)
-    df = scored.merge(pos, on=['bill_number', 'general_court'], how='left')
+    df = scored.merge(pos, on=['bill_id', 'general_court'], how='left')
 
     for col in ['n_supporters', 'n_opposers', 'n_neutrals', 'n_no_position']:
         df[col] = df[col].fillna(0).astype(int)
@@ -179,8 +210,13 @@ def export_bills_list(engine, parquet_df: pd.DataFrame, out_dir: Path) -> pd.Dat
 def export_bills_detail(engine, parquet_df: pd.DataFrame, out_dir: Path):
     print('Exporting bills_detail.json…')
     scored = _load_scored_base(engine)
+    stubs = _load_unscored_stubs(engine)
+    for col in ['env_relevance_score', 'is_environmental', 'cluster_id', 'cluster_label']:
+        stubs[col] = None
+    scored = pd.concat([scored, stubs], ignore_index=True, sort=False)
+
     pos = _load_position_counts(engine)
-    df = scored.merge(pos, on=['bill_number', 'general_court'], how='left')
+    df = scored.merge(pos, on=['bill_id', 'general_court'], how='left')
 
     for col in ['n_supporters', 'n_opposers', 'n_neutrals', 'n_no_position']:
         df[col] = df[col].fillna(0).astype(int)
@@ -227,23 +263,8 @@ def export_bills_detail(engine, parquet_df: pd.DataFrame, out_dir: Path):
     write_json(out_dir / 'bills_detail.json', result, 'bills_detail')
 
 
-def _load_lobbying_bills_with_ids(engine) -> pd.DataFrame:
-    """Load MA_Lobbying_Bills joined to MA_Lobbying_Bills_Scored to get bill_id."""
-    lb = pd.read_sql("""
-        SELECT lb.entity_name, lb.client_name, lb.year, lb.general_court,
-               lb.bill_number, lb.bill_title, lb.position, lb.amount,
-               s.bill_id
-        FROM MA_Lobbying_Bills lb
-        LEFT JOIN MA_Lobbying_Bills_Scored s
-               ON lb.bill_number = s.bill_number AND lb.general_court = s.general_court
-    """, engine)
-    lb['position'] = lb['position'].fillna('No position')
-    lb['amount'] = pd.to_numeric(lb['amount'], errors='coerce').fillna(0.0)
-    return lb
-
-
 def _load_env_flags(engine, parquet_df: pd.DataFrame) -> pd.DataFrame:
-    """Return a DF of bill_id, general_court → is_env_llm."""
+    """Return a DF of (bill_id, general_court) → is_env_llm."""
     if len(parquet_df):
         return parquet_df[['bill_id', 'general_court', 'is_env_llm']].copy()
     scored = pd.read_sql(
@@ -264,7 +285,15 @@ def _load_compensation(engine) -> pd.DataFrame:
 
 def export_employers(engine, parquet_df: pd.DataFrame, out_dir: Path):
     print('Exporting employers.json…')
-    lb = _load_lobbying_bills_with_ids(engine)
+    # bill_id is now a direct column in MA_Lobbying_Bills — no join to Scored needed
+    lb = pd.read_sql("""
+        SELECT entity_name, client_name, year, general_court,
+               bill_number, bill_title, position, amount, bill_id
+        FROM MA_Lobbying_Bills
+    """, engine)
+    lb['position'] = lb['position'].fillna('No position')
+    lb['amount'] = pd.to_numeric(lb['amount'], errors='coerce').fillna(0.0)
+
     env = _load_env_flags(engine, parquet_df)
     comp_df = _load_compensation(engine)
 
@@ -289,12 +318,11 @@ def export_employers(engine, parquet_df: pd.DataFrame, out_dir: Path):
     records = []
     for client_name, group in lb.groupby('client_name', sort=False):
         slug = slugify(client_name)
-        bills = group[['bill_id', 'general_court']].drop_duplicates()
+        bills = group[['bill_id', 'general_court']].dropna(subset=['bill_id']).drop_duplicates()
         n_total = len(bills)
-        env_bills = group[group['is_env_llm']][['bill_id', 'general_court']].drop_duplicates()
+        env_bills = group[group['is_env_llm']][['bill_id', 'general_court']].dropna(subset=['bill_id']).drop_duplicates()
         n_env = len(env_bills)
 
-        # Compensation from MA_Lobbying_Employers
         client_comp = comp_df[comp_df['client_name'] == client_name]
         total_comp = float(client_comp['compensation'].sum())
         env_frac = n_env / n_total if n_total > 0 else 0.0
@@ -304,7 +332,7 @@ def export_employers(engine, parquet_df: pd.DataFrame, out_dir: Path):
 
         years = sorted(group['year'].dropna().astype(int).unique().tolist())
 
-        pos_by_client_bill = group.drop_duplicates(subset=['bill_number', 'general_court'])
+        pos_by_client_bill = group.drop_duplicates(subset=['bill_id', 'general_court'])
         pos_counts = pos_by_client_bill['position'].value_counts().to_dict()
         positions = {
             'support': int(pos_counts.get('Support', 0)),
@@ -315,8 +343,7 @@ def export_employers(engine, parquet_df: pd.DataFrame, out_dir: Path):
 
         all_tags = []
         for _, row in bills.iterrows():
-            key = (row['bill_id'], row['general_court'])
-            all_tags.extend(tag_map.get(key, []))
+            all_tags.extend(tag_map.get((row['bill_id'], row['general_court']), []))
         top_tags = [[t, c] for t, c in Counter(all_tags).most_common(5)]
 
         records.append({
@@ -337,21 +364,14 @@ def export_employers(engine, parquet_df: pd.DataFrame, out_dir: Path):
     write_json(out_dir / 'employers.json', records, 'employers')
 
 
-def export_lobbyists(engine, parquet_df: pd.DataFrame, out_dir: Path):
+def export_lobbyists(engine, out_dir: Path):
     print('Exporting lobbyists.json…')
     comp_df = _load_compensation(engine)
-    env = _load_env_flags(engine, parquet_df)
 
     lb = pd.read_sql("""
-        SELECT lb.entity_name, lb.client_name, lb.year, lb.general_court, lb.bill_number,
-               s.bill_id
-        FROM MA_Lobbying_Bills lb
-        LEFT JOIN MA_Lobbying_Bills_Scored s
-               ON lb.bill_number = s.bill_number AND lb.general_court = s.general_court
+        SELECT entity_name, client_name, year, general_court, bill_id
+        FROM MA_Lobbying_Bills
     """, engine)
-    lb = lb.merge(env[['bill_id', 'general_court', 'is_env_llm']],
-                  on=['bill_id', 'general_court'], how='left')
-    lb['is_env_llm'] = lb['is_env_llm'].fillna(False).astype(bool)
 
     records = []
     for entity_name, group in lb.groupby('entity_name', sort=False):
@@ -379,18 +399,14 @@ def export_lobbyists(engine, parquet_df: pd.DataFrame, out_dir: Path):
 def export_edges_by_bill(engine, out_dir: Path):
     print('Exporting edges_by_bill.json…')
     lb = pd.read_sql("""
-        SELECT lb.entity_name, lb.client_name, lb.year, lb.general_court,
-               lb.bill_number, lb.position, s.bill_id
-        FROM MA_Lobbying_Bills lb
-        LEFT JOIN MA_Lobbying_Bills_Scored s
-               ON lb.bill_number = s.bill_number AND lb.general_court = s.general_court
+        SELECT entity_name, client_name, year, general_court, position, bill_id
+        FROM MA_Lobbying_Bills
+        WHERE bill_id IS NOT NULL
     """, engine)
     lb = lb.where(pd.notnull(lb), None)
 
     result = {}
     for (bill_id, gc), group in lb.groupby(['bill_id', 'general_court'], sort=False):
-        if bill_id is None:
-            continue
         key = f'{bill_id}_{int(gc)}'
         recs = []
         for _, row in group.iterrows():
@@ -410,11 +426,9 @@ def export_edges_by_bill(engine, out_dir: Path):
 def export_edges_by_employer(engine, out_dir: Path):
     print('Exporting edges_by_employer.json…')
     lb = pd.read_sql("""
-        SELECT lb.client_name, lb.entity_name, lb.year, lb.general_court,
-               lb.bill_number, lb.position, s.bill_id
-        FROM MA_Lobbying_Bills lb
-        LEFT JOIN MA_Lobbying_Bills_Scored s
-               ON lb.bill_number = s.bill_number AND lb.general_court = s.general_court
+        SELECT client_name, entity_name, year, general_court, position, bill_id
+        FROM MA_Lobbying_Bills
+        WHERE bill_id IS NOT NULL
     """, engine)
     lb = lb.where(pd.notnull(lb), None)
 
@@ -476,7 +490,7 @@ def main():
     print()
 
     if db_path is None or not db_path.exists():
-        print(f'ERROR: Database not found. Use --db-path.', file=sys.stderr)
+        print('ERROR: Database not found. Use --db-path.', file=sys.stderr)
         sys.exit(1)
 
     engine = create_engine(f'sqlite:///{db_path}')
@@ -488,7 +502,7 @@ def main():
     export_bills_list(engine, parquet_df, out_dir)
     export_bills_detail(engine, parquet_df, out_dir)
     export_employers(engine, parquet_df, out_dir)
-    export_lobbyists(engine, parquet_df, out_dir)
+    export_lobbyists(engine, out_dir)
     export_edges_by_bill(engine, out_dir)
     export_edges_by_employer(engine, out_dir)
 
