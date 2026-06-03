@@ -30,7 +30,7 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install pandas sqlalchemy pyarrow
+        run: pip install -r requirements.txt
 
       - name: Download source data from GCS
         run: |
