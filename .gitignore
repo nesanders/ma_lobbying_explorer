@@ -1,3 +1,7 @@
 __pycache__/
 *.pyc
 .DS_Store
+data/*.json
+amend.db
+amend.db.gz
+MA_bill_embeddings.parquet

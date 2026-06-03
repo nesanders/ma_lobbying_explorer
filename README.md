@@ -16,34 +16,44 @@ A static site for browsing Massachusetts Legislature lobbying disclosures, 2009�
 
 Data is processed by the [AMEND project](https://github.com/nesanders/MAenvironmentaldata) which adds LLM-based environmental relevance scoring, bill summaries, categories, and tags.
 
-## How to update the data
+## Automated deploys
 
-1. Ensure the [MAenvironmentaldata](https://github.com/nesanders/MAenvironmentaldata) repository is checked out as a sibling of this repo.
+A GitHub Actions workflow (`.github/workflows/rebuild.yml`) runs every Monday at 06:00 UTC. It:
+1. Downloads `amend.db.gz` and `MA_bill_embeddings.parquet` from `gs://openamend-data/` (public, no auth required)
+2. Runs `build/export_json.py` to generate the JSON data files
+3. Deploys the full site (HTML + CSS + JS + data) to GitHub Pages
 
-2. Run the export script:
-   ```bash
-   cd build/
-   python export_json.py
-   ```
-   This reads `AMEND.db` and `MA_bill_embeddings.parquet` from the AMEND repo and writes JSON files to `data/`.
+To trigger a manual rebuild: **Actions → Rebuild and deploy → Run workflow**.
 
-   Optional flags:
-   ```
-   --db-path /path/to/AMEND.db
-   --parquet-path /path/to/MA_bill_embeddings.parquet
-   --output-dir /path/to/output/
-   ```
+The `data/` directory is not committed to git — JSON files are generated fresh on each deploy and served directly from GitHub Pages alongside the HTML:
 
-3. Copy the generated JSON files to the `data/` directory (already done if you used the default output dir).
+| File | URL |
+|------|-----|
+| bills_list.json | https://nesanders.github.io/ma_lobbying_explorer/data/bills_list.json |
+| bills_detail.json | https://nesanders.github.io/ma_lobbying_explorer/data/bills_detail.json |
+| employers.json | https://nesanders.github.io/ma_lobbying_explorer/data/employers.json |
+| lobbyists.json | https://nesanders.github.io/ma_lobbying_explorer/data/lobbyists.json |
+| edges_by_bill.json | https://nesanders.github.io/ma_lobbying_explorer/data/edges_by_bill.json |
+| edges_by_employer.json | https://nesanders.github.io/ma_lobbying_explorer/data/edges_by_employer.json |
+| clusters.json | https://nesanders.github.io/ma_lobbying_explorer/data/clusters.json |
 
-4. Commit and push:
-   ```bash
-   git add data/
-   git commit -m "Update data $(date +%Y-%m-%d)"
-   git push
-   ```
+## How to update the data locally
 
-GitHub Pages will automatically serve the updated site within a minute or two.
+```bash
+curl -fL https://storage.googleapis.com/openamend-data/amend.db.gz | gunzip > amend.db
+curl -fL https://storage.googleapis.com/openamend-data/MA_bill_embeddings.parquet \
+     -o MA_bill_embeddings.parquet
+
+python build/export_json.py \
+  --db-path amend.db \
+  --parquet-path MA_bill_embeddings.parquet \
+  --output-dir data/
+```
+
+Then serve locally:
+```bash
+node server.js --port=8080
+```
 
 ## File structure
 
