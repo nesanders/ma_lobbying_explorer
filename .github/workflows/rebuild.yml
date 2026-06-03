@@ -35,7 +35,7 @@ jobs:
       - name: Download source data from GCS
         run: |
           curl -fL https://storage.googleapis.com/openamend-data/amend.db.gz \
-            | gunzip > amend.db
+            -o amend.db
           curl -fL https://storage.googleapis.com/openamend-data/MA_bill_embeddings.parquet \
             -o MA_bill_embeddings.parquet
 
