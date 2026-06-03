@@ -88,6 +88,18 @@ function slugify(name) {
   return String(name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
+// Normalize a slug to match entity normalization applied in export_json.py.
+// Used as a fallback lookup when a URL slug predates the normalization (e.g.
+// "partners-in-democracy-inc" -> "partners-in-democracy").
+function normalizeSlug(slug) {
+  return slug
+    .replace(/[- ]+(llc|llp|inc|incorporated|corporation|corp|ltd|limited|pc|pllc)\b/gi, '')
+    .replace(/[- ]+the\b/gi, '')
+    .replace(/\bthe[- ]+/gi, '')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
 function escHtml(str) {
   if (str == null) return '';
   return String(str)

@@ -178,7 +178,8 @@
       const billTitleLookup = Object.fromEntries(
         billsList.map(b => [`${b.bill_id}_${b.general_court}`, b.bill_title])
       );
-      const emp = emps.find(e => e.client_slug === slug);
+      const emp = emps.find(e => e.client_slug === slug)
+               || emps.find(e => e.client_slug === normalizeSlug(slug));
       if (!emp) {
         main.innerHTML = `<div class="breadcrumb"><a href="employers.html">← All employers</a></div><div class="error-state"><strong>Employer not found</strong>No record for "${escHtml(slug)}".</div>`;
         return;

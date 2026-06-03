@@ -116,7 +116,8 @@
     showLoading(main);
 
     Promise.all([DATA.lobbyists, DATA.employers, getEdgesByEmployer()]).then(([lobbyists, employers, edgesByEmp]) => {
-      const entity = lobbyists.find(l => l.entity_slug === slug);
+      const entity = lobbyists.find(l => l.entity_slug === slug)
+                  || lobbyists.find(l => l.entity_slug === normalizeSlug(slug));
       if (!entity) {
         main.innerHTML = `<div class="breadcrumb"><a href="lobbyists.html">← All lobbyists</a></div><div class="error-state"><strong>Firm not found</strong>No record for "${escHtml(slug)}".</div>`;
         return;
