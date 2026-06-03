@@ -185,7 +185,7 @@
         return;
       }
       document.title = `${emp.client_name} — MA Lobbying Explorer`;
-      const edges = edgesByEmp ? (edgesByEmp[slug] || []) : [];
+      const edges = edgesByEmp ? (edgesByEmp[slug] || edgesByEmp[emp.client_slug] || []) : [];
       renderDetailView(emp, edges, emps, edgesByEmp, billTitleLookup);
     }).catch(err => {
       main.innerHTML = `
