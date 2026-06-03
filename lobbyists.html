@@ -164,6 +164,9 @@
 
       <h2>Clients</h2>
       <div id="clients-table"></div>
+
+      <h2>Bills lobbied</h2>
+      <div id="bills-table"></div>
     `;
 
     const clientColumns = [
@@ -178,6 +181,27 @@
     } else {
       clientsContainer.innerHTML = '<p class="no-data">No client data available.</p>';
     }
+
+    // Bills lobbied across all clients
+    const billMap = {};
+    Object.entries(edgesByEmp).forEach(([clientSlug, edges]) => {
+      edges.filter(e => slugify(e.entity_name || '') === entity.entity_slug).forEach(e => {
+        if (!e.bill_id) return;
+        const key = `${e.bill_id}_${e.general_court}`;
+        if (!billMap[key]) billMap[key] = { bill_id: e.bill_id, general_court: e.general_court, year: e.year, position: e.position };
+      });
+    });
+    const billRows = Object.values(billMap).sort((a, b) => (b.year || 0) - (a.year || 0));
+    renderTable(document.getElementById('bills-table'), [
+      { key: 'bill_id', label: 'Bill ID', render: row => {
+          const detailUrl = `bills.html?id=${encodeURIComponent(row.bill_id)}&gc=${encodeURIComponent(row.general_court)}`;
+          const malegUrl = `https://malegislature.gov/Bills/${encodeURIComponent(row.general_court)}/${encodeURIComponent(row.bill_id)}`;
+          return `<a href="${escHtml(detailUrl)}">${escHtml(row.bill_id)}</a> <a href="${escHtml(malegUrl)}" class="ext" target="_blank" rel="noopener" style="font-size:0.8em">↗</a>`;
+      }},
+      { key: 'general_court', label: 'GC', render: row => `<span class="chip chip-gc">GC${row.general_court}</span>`, className: 'hide-sm' },
+      { key: 'year', label: 'Year', className: 'num' },
+      { key: 'position', label: 'Position', render: row => positionChip(row.position) },
+    ], billRows, { defaultSortCol: 'year', defaultSortDir: 'desc' });
 
     if (Object.keys(compByYear).length > 1) {
       const sortedYears = Object.keys(compByYear).sort();

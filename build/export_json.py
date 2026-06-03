@@ -49,6 +49,37 @@ def slugify(name: str) -> str:
     return re.sub(r'[^a-z0-9]+', '-', str(name).lower()).strip('-')
 
 
+# Entity name normalization — ported from AMEND assemble_db.py (commit 4406077).
+# Groups variants like "Partners In Democracy" / "Partners in Democracy Inc" /
+# "LAN-TEL Communications" / "Lan-Tel Communications Inc" under one canonical key.
+_ENTITY_DBA_RE    = re.compile(r'\s+D\s*/+B\s*/+A?\s+.*|\s+DBA\s+.*', re.IGNORECASE)
+_ENTITY_LEGAL_RE  = re.compile(r'\b(LLC|LLP|INC|INCORPORATED|CORPORATION|CORP|LTD|LIMITED|PC|PLLC)\b')
+_ENTITY_ARTICLE_RE = re.compile(r'\bTHE\b')
+_ENTITY_MISC = [
+    'LAW OFFICE OF', 'AND ASSOCIATES', '& ASSOCIATES', 'AND ASSOC',
+    'ATTORNEY AT LAW', 'ATTORNEY@LAW', 'ATTORNET AT LAW', 'AND PARTNERS',
+    'PUBLIC POLICY GROUP', 'LEGISLATIVE SERVICES', 'POLICY GROUP',
+    'ASSOCIATES', 'COUNSELLORS AT LAW',
+]
+
+
+def normalize_entity(name: str) -> str:
+    if not isinstance(name, str):
+        return ''
+    x = name.upper()
+    x = _ENTITY_DBA_RE.sub('', x)
+    x = x.replace('-', ' ')
+    for ch in (',', '.', "'", '‘', '’', '(', ')'):
+        x = x.replace(ch, ' ')
+    x = _ENTITY_LEGAL_RE.sub(' ', x)
+    x = _ENTITY_ARTICLE_RE.sub(' ', x)
+    x = x.replace('&', 'AND')
+    x = x.replace('ASSICIATES', 'ASSOCIATES')
+    for token in _ENTITY_MISC:
+        x = x.replace(token, ' ')
+    return re.sub(r'\s+', ' ', x).strip()
+
+
 SOS_BASE = 'https://www.sec.state.ma.us/LobbyistPublicSearch/'
 
 
@@ -315,9 +346,13 @@ def export_employers(engine, parquet_df: pd.DataFrame, out_dir: Path):
                 except Exception:
                     pass
 
+    lb['_client_norm'] = lb['client_name'].apply(normalize_entity)
+
     records = []
-    for client_name, group in lb.groupby('client_name', sort=False):
-        slug = slugify(client_name)
+    for norm_key, group in lb.groupby('_client_norm', sort=False):
+        vc = group['client_name'].dropna().value_counts()
+        client_name = vc.idxmax() if len(vc) else norm_key
+        slug = slugify(norm_key)
         bills = group[['bill_id', 'general_court']].dropna(subset=['bill_id']).drop_duplicates()
         n_total = len(bills)
         env_bills = group[group['is_env_llm']][['bill_id', 'general_court']].dropna(subset=['bill_id']).drop_duplicates()
@@ -373,9 +408,12 @@ def export_lobbyists(engine, out_dir: Path):
         FROM MA_Lobbying_Bills
     """, engine)
 
+    lb['_entity_norm'] = lb['entity_name'].apply(normalize_entity)
+
     records = []
-    for entity_name, group in lb.groupby('entity_name', sort=False):
-        slug = slugify(entity_name)
+    for norm_key, group in lb.groupby('_entity_norm', sort=False):
+        entity_name = group['entity_name'].value_counts().idxmax()
+        slug = slugify(norm_key)
         clients = group['client_name'].dropna().unique().tolist()
         entity_comp = comp_df[comp_df['entity_name'] == entity_name]
         total_comp = float(entity_comp['compensation'].sum())
@@ -433,10 +471,12 @@ def export_edges_by_employer(engine, out_dir: Path):
     lb = lb.where(pd.notnull(lb), None)
 
     result = {}
-    for client_name, group in lb.groupby('client_name', sort=False):
-        if not client_name:
+    lb['_client_norm'] = lb['client_name'].apply(normalize_entity)
+
+    for norm_key, group in lb.groupby('_client_norm', sort=False):
+        if not norm_key:
             continue
-        slug = slugify(str(client_name))
+        slug = slugify(norm_key)
         recs = []
         for _, row in group.iterrows():
             en = row['entity_name']
