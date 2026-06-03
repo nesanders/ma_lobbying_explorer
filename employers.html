@@ -239,6 +239,9 @@
         </div>
       </div>
 
+      <h2>Lobbying firms used</h2>
+      <div id="firms-table"></div>
+
       ${opponents.length ? `
         <h2>Most often on opposite sides</h2>
         <p style="font-size:0.85rem;color:var(--muted);margin-bottom:0.5rem">Top employers who took opposite positions on the same bills</p>
@@ -281,6 +284,25 @@
     }
 
     renderBillsTable(sortedEdges);
+
+    // Aggregate lobbying firms from edge data
+    const firmMap = {};
+    sortedEdges.forEach(e => {
+      if (!e.entity_name) return;
+      const slug = slugify(e.entity_name);
+      if (!firmMap[slug]) firmMap[slug] = { entity_name: e.entity_name, entity_slug: slug, bills: new Set(), years: new Set() };
+      if (e.bill_id) firmMap[slug].bills.add(`${e.bill_id}_${e.general_court}`);
+      if (e.year) firmMap[slug].years.add(e.year);
+    });
+    const firms = Object.values(firmMap)
+      .map(f => ({ ...f, n_bills: f.bills.size, year_range: f.years.size ? `${Math.min(...f.years)}–${Math.max(...f.years)}` : '—' }))
+      .sort((a, b) => b.n_bills - a.n_bills);
+
+    renderTable(document.getElementById('firms-table'), [
+      { key: 'entity_name', label: 'Firm', render: row => `<a href="lobbyists.html?name=${encodeURIComponent(row.entity_slug)}">${escHtml(row.entity_name)}</a>` },
+      { key: 'n_bills', label: 'Bills', className: 'num' },
+      { key: 'year_range', label: 'Years', className: 'num hide-sm', sortable: false },
+    ], firms, { defaultSortCol: 'n_bills', defaultSortDir: 'desc' });
 
     if ((emp.top_tags || []).length) {
       const rawTags = (emp.top_tags || []).slice(0, 8);
