@@ -202,7 +202,8 @@
 
     const sortedEdges = [...edges].sort((a, b) => (b.year || 0) - (a.year || 0));
 
-    const opponents = computeOpponents(edges, edgesByEmp, emp.client_slug);
+    const slugToName = Object.fromEntries(allEmps.map(e => [e.client_slug, e.client_name]));
+    const opponents = computeOpponents(edges, edgesByEmp, emp.client_slug, slugToName);
 
     const yearData = buildYearData(edges, emp.compensation_by_year || {});
 
@@ -342,7 +343,7 @@
     return data;
   }
 
-  function computeOpponents(myEdges, edgesByEmp, mySlug) {
+  function computeOpponents(myEdges, edgesByEmp, mySlug, slugToName = {}) {
     const OPPOSE_POSITIONS = new Set(['Oppose']);
     const SUPPORT_POSITIONS = new Set(['Support']);
 
@@ -364,9 +365,8 @@
         const isOpposed = (SUPPORT_POSITIONS.has(myPos) && OPPOSE_POSITIONS.has(theirPos)) ||
                           (OPPOSE_POSITIONS.has(myPos) && SUPPORT_POSITIONS.has(theirPos));
         if (!isOpposed) return;
-        if (!opponentCounts[slug]) opponentCounts[slug] = { name: '', count: 0, slug };
+        if (!opponentCounts[slug]) opponentCounts[slug] = { name: slugToName[slug] || slug, count: 0, slug };
         opponentCounts[slug].count++;
-        if (!opponentCounts[slug].name) opponentCounts[slug].name = e.client_name || slug;
       });
     });
 
