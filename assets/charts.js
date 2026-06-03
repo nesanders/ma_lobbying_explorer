@@ -153,7 +153,7 @@ function renderBar(canvasId, labels, values, opts = {}) {
     destroyChart(canvasId);
     const canvas = document.getElementById(canvasId);
     if (!canvas) return null;
-    return new Chart(canvas, {
+    const chart = new Chart(canvas, {
       type: 'bar',
       data: {
         labels,
@@ -200,8 +200,16 @@ function renderBar(canvasId, labels, values, opts = {}) {
             },
           },
         },
+        onClick: opts.onClickLabel ? (evt, elements, chart) => {
+          if (!elements.length) return;
+          const idx = elements[0].index;
+          const label = chart.data.labels[idx];
+          if (label) opts.onClickLabel(label);
+        } : undefined,
       },
     });
+    if (opts.onClickLabel) chart.canvas.style.cursor = 'pointer';
+    return chart;
   });
 }
 

@@ -15,6 +15,7 @@
     <a href="bills.html">Bills</a>
     <a href="employers.html" class="active">Employers</a>
     <a href="lobbyists.html">Lobbyists</a>
+    <a href="topics.html">Topics</a>
   </nav>
 </header>
 
@@ -315,6 +316,7 @@
         color: '#16a34a',
         horizontal: true,
         tooltipLabel: v => String(v),
+        onClickLabel: tag => { window.location.href = `topics.html?tag=${encodeURIComponent(tag)}`; },
       });
     }
 

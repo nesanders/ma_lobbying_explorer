@@ -2,7 +2,7 @@ const DATA = {
   billsList: fetch('data/bills_list.json').then(r => { if (!r.ok) throw new Error('bills_list.json not found'); return r.json(); }),
   employers:  fetch('data/employers.json').then(r => { if (!r.ok) throw new Error('employers.json not found'); return r.json(); }),
   lobbyists:  fetch('data/lobbyists.json').then(r => { if (!r.ok) throw new Error('lobbyists.json not found'); return r.json(); }),
-  clusters:   fetch('data/clusters.json').then(r => { if (!r.ok) throw new Error('clusters.json not found'); return r.json(); }),
+  tags:       fetch('data/tags.json').then(r => { if (!r.ok) throw new Error('tags.json not found'); return r.json(); }),
 };
 
 let _billsDetail = null, _edgesByBill = null, _edgesByEmployer = null;
@@ -82,6 +82,14 @@ function positionChip(pos) {
   const normalized = pos ? pos.trim() : 'No position';
   const style = map[normalized] || map['No position'];
   return `<span class="position-chip" style="background:${style.bg};color:${style.text}">${escHtml(normalized)}</span>`;
+}
+
+function tagChip(tag) {
+  return `<a href="topics.html?tag=${encodeURIComponent(tag)}" class="chip chip-tag chip-link">${escHtml(tag)}</a>`;
+}
+
+function categoryChip(cat) {
+  return `<a href="bills.html?cat=${encodeURIComponent(cat)}" class="chip chip-category chip-link">${escHtml(cat)}</a>`;
 }
 
 function slugify(name) {

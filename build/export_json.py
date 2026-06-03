@@ -209,8 +209,12 @@ def export_bills_list(engine, parquet_df: pd.DataFrame, out_dir: Path) -> pd.Dat
         df[col] = df[col].fillna(0).astype(int)
 
     if len(parquet_df):
+        par_cols = ['bill_id', 'general_court', 'is_env_llm', 'env_relevance_score']
+        for col in ('categories', 'tags'):
+            if col in parquet_df.columns:
+                par_cols.append(col)
         df = df.merge(
-            parquet_df[['bill_id', 'general_court', 'is_env_llm', 'env_relevance_score']],
+            parquet_df[par_cols],
             on=['bill_id', 'general_court'], how='left', suffixes=('', '_par')
         )
         if 'env_relevance_score_par' in df.columns:
@@ -225,14 +229,30 @@ def export_bills_list(engine, parquet_df: pd.DataFrame, out_dir: Path) -> pd.Dat
     df = df.where(pd.notnull(df), None)
 
     col_order = ['bill_id', 'bill_number', 'general_court', 'bill_title',
-                 'is_env_llm', 'env_relevance_score', 'cluster_id', 'cluster_label',
+                 'is_env_llm', 'env_relevance_score',
+                 'categories', 'tags',
                  'n_supporters', 'n_opposers', 'n_neutrals', 'n_no_position', 'passed']
     df = df[[c for c in col_order if c in df.columns]]
 
     records = []
     for rec in df.to_dict(orient='records'):
-        records.append({k: (None if isinstance(v, float) and pd.isna(v) else v)
-                        for k, v in rec.items()})
+        out = {}
+        for k, v in rec.items():
+            if isinstance(v, float) and pd.isna(v):
+                out[k] = None
+            elif k in ('categories', 'tags'):
+                if isinstance(v, list):
+                    out[k] = v
+                elif isinstance(v, str) and v not in ('', 'nan'):
+                    try:
+                        out[k] = json.loads(v)
+                    except Exception:
+                        out[k] = []
+                else:
+                    out[k] = []
+            else:
+                out[k] = v
+        records.append(out)
 
     write_json(out_dir / 'bills_list.json', records, 'bills_list')
     return df
@@ -399,7 +419,7 @@ def export_employers(engine, parquet_df: pd.DataFrame, out_dir: Path):
     write_json(out_dir / 'employers.json', records, 'employers')
 
 
-def export_lobbyists(engine, out_dir: Path):
+def export_lobbyists(engine, parquet_df: pd.DataFrame, out_dir: Path):
     print('Exporting lobbyists.json…')
     comp_df = _load_compensation(engine)
 
@@ -409,6 +429,20 @@ def export_lobbyists(engine, out_dir: Path):
     """, engine)
 
     lb['_entity_norm'] = lb['entity_name'].apply(normalize_entity)
+
+    tag_map = {}
+    if len(parquet_df) and 'tags' in parquet_df.columns:
+        tag_par = parquet_df[parquet_df['tags'].notna()][['bill_id', 'general_court', 'tags']].copy()
+        for _, row in tag_par.iterrows():
+            key = (row['bill_id'], row['general_court'])
+            t = row['tags']
+            if isinstance(t, list):
+                tag_map[key] = t
+            elif isinstance(t, str):
+                try:
+                    tag_map[key] = json.loads(t)
+                except Exception:
+                    pass
 
     records = []
     for norm_key, group in lb.groupby('_entity_norm', sort=False):
@@ -421,6 +455,12 @@ def export_lobbyists(engine, out_dir: Path):
         comp_by_year = {int(y): round(float(v), 2)
                         for y, v in entity_comp.groupby('year')['compensation'].sum().items()}
 
+        all_tags = []
+        bills = group[['bill_id', 'general_court']].dropna(subset=['bill_id'])
+        for _, row in bills.iterrows():
+            all_tags.extend(tag_map.get((row['bill_id'], row['general_court']), []))
+        top_tags = [[t, c] for t, c in Counter(all_tags).most_common(5)]
+
         records.append({
             'entity_name': entity_name,
             'entity_slug': slug,
@@ -428,6 +468,7 @@ def export_lobbyists(engine, out_dir: Path):
             'total_compensation': round(total_comp, 2),
             'years_active': years,
             'compensation_by_year': comp_by_year,
+            'top_tags': top_tags,
             'sos_search_url': sos_entity_url(entity_name),
         })
 
@@ -492,6 +533,79 @@ def export_edges_by_employer(engine, out_dir: Path):
     write_json(out_dir / 'edges_by_employer.json', result, 'edges_by_employer')
 
 
+def export_tags(engine, parquet_df: pd.DataFrame, out_dir: Path):
+    print('Exporting tags.json…')
+
+    tag_map = {}
+    if len(parquet_df) and 'tags' in parquet_df.columns:
+        tag_par = parquet_df[parquet_df['tags'].notna()][['bill_id', 'general_court', 'tags']].copy()
+        for _, row in tag_par.iterrows():
+            key = (row['bill_id'], int(row['general_court']))
+            t = row['tags']
+            if isinstance(t, list):
+                tag_map[key] = t
+            elif isinstance(t, str):
+                try:
+                    tag_map[key] = json.loads(t)
+                except Exception:
+                    pass
+
+    lb = pd.read_sql("""
+        SELECT client_name, entity_name, bill_id, general_court
+        FROM MA_Lobbying_Bills
+        WHERE bill_id IS NOT NULL
+    """, engine)
+    lb['_client_norm'] = lb['client_name'].apply(normalize_entity)
+
+    tag_emp = {}   # tag -> Counter(client_slug -> bill count)
+    tag_lob = {}   # tag -> Counter(entity_slug -> bill count)
+
+    for norm_key, group in lb.groupby('_client_norm', sort=False):
+        if not norm_key:
+            continue
+        client_slug = slugify(norm_key)
+        vc = group['client_name'].dropna().value_counts()
+        client_display = vc.idxmax() if len(vc) else norm_key
+
+        seen_by_tag = {}
+        for _, row in group.iterrows():
+            key = (row['bill_id'], int(row['general_court']))
+            for tag in tag_map.get(key, []):
+                if tag not in seen_by_tag:
+                    seen_by_tag[tag] = set()
+                seen_by_tag[tag].add(key)
+
+            ent_slug = slugify(normalize_entity(row['entity_name'] or ''))
+            for tag in tag_map.get(key, []):
+                if tag not in tag_lob:
+                    tag_lob[tag] = Counter()
+                tag_lob[tag][(row['entity_name'] or '', ent_slug)] += 1
+
+        for tag, bill_keys in seen_by_tag.items():
+            if tag not in tag_emp:
+                tag_emp[tag] = Counter()
+            tag_emp[tag][(client_display, client_slug)] += len(bill_keys)
+
+    all_tags = sorted(set(tag_emp) | set(tag_lob))
+    result = {}
+    for tag in all_tags:
+        top_emps = [
+            [name, slug, count]
+            for (name, slug), count in (tag_emp.get(tag, Counter())).most_common(10)
+        ]
+        top_lobs = [
+            [name, slug, count]
+            for (name, slug), count in (tag_lob.get(tag, Counter())).most_common(10)
+        ]
+        result[tag] = {
+            'n_bills': sum(v for v in (tag_emp.get(tag, Counter())).values()),
+            'top_employers': top_emps,
+            'top_lobbyists': top_lobs,
+        }
+
+    write_json(out_dir / 'tags.json', result, 'tags')
+
+
 def main():
     parser = argparse.ArgumentParser(description='Export JSON data files for MA Lobbying Explorer')
     parser.add_argument('--db-path', default=None)
@@ -542,7 +656,8 @@ def main():
     export_bills_list(engine, parquet_df, out_dir)
     export_bills_detail(engine, parquet_df, out_dir)
     export_employers(engine, parquet_df, out_dir)
-    export_lobbyists(engine, out_dir)
+    export_lobbyists(engine, parquet_df, out_dir)
+    export_tags(engine, parquet_df, out_dir)
     export_edges_by_bill(engine, out_dir)
     export_edges_by_employer(engine, out_dir)
 

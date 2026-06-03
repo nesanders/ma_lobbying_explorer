@@ -231,6 +231,7 @@ h3 { font-size: 1rem; font-weight: 600; margin: 1rem 0 0.5rem; }
 .filter-group input:focus, .filter-group select:focus { border-color: var(--link); }
 
 .filter-group.wide { min-width: 220px; }
+.filter-hint { font-size: 0.72rem; color: var(--muted); font-style: italic; }
 
 .toggle-label {
   display: flex;
@@ -315,6 +316,9 @@ tbody td.truncate { max-width: 280px; white-space: nowrap; overflow: hidden; tex
 .chip-unknown { background: var(--none-color); color: var(--muted); }
 .chip-category { background: #f3e8ff; color: #6b21a8; }
 .chip-tag { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
+.no-taxonomy-note { font-size: 0.78rem; color: var(--muted); font-style: italic; }
+.chip-link { text-decoration: none; cursor: pointer; }
+.chip-link:hover { filter: brightness(0.9); }
 
 .env-badge {
   display: inline-flex;

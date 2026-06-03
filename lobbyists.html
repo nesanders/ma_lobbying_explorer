@@ -15,6 +15,7 @@
     <a href="bills.html">Bills</a>
     <a href="employers.html">Employers</a>
     <a href="lobbyists.html" class="active">Lobbyists</a>
+    <a href="topics.html">Topics</a>
   </nav>
 </header>
 
@@ -156,6 +157,13 @@
         <div class="stats-bar-item"><div class="sb-value">${yearRange}</div><div class="sb-label">Years active</div></div>
       </div>
 
+      ${(entity.top_tags || []).length ? `
+        <div class="chart-wrap" style="height:${Math.max(120, (entity.top_tags.length * 30) + 40)}px">
+          <h3 style="margin-top:0">Top bill tags</h3>
+          <canvas id="tags-bar"></canvas>
+        </div>
+      ` : ''}
+
       ${Object.keys(compByYear).length > 1 ? `
         <div class="chart-wrap" style="height:200px">
           <h3 style="margin-top:0">Compensation per year</h3>
@@ -213,6 +221,19 @@
         horizontal: false,
         xFormat: v => formatMoney(v),
         tooltipLabel: v => formatMoney(v),
+      });
+    }
+
+    if ((entity.top_tags || []).length) {
+      const rawTags = entity.top_tags.slice(0, 8);
+      const tagLabels = rawTags.map(tc => Array.isArray(tc) ? tc[0] : tc);
+      const tagCounts = rawTags.map(tc => Array.isArray(tc) ? tc[1] : 1);
+      renderBar('tags-bar', tagLabels, tagCounts, {
+        label: 'Tag count',
+        color: '#16a34a',
+        horizontal: true,
+        tooltipLabel: v => String(v),
+        onClickLabel: tag => { window.location.href = `topics.html?tag=${encodeURIComponent(tag)}`; },
       });
     }
   }

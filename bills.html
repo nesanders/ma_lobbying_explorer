@@ -15,6 +15,7 @@
     <a href="bills.html" class="active">Bills</a>
     <a href="employers.html">Employers</a>
     <a href="lobbyists.html">Lobbyists</a>
+    <a href="topics.html">Topics</a>
   </nav>
 </header>
 
@@ -51,21 +52,21 @@
     document.title = 'Bills — MA Lobbying Explorer';
     showLoading(main);
 
-    Promise.all([DATA.billsList, DATA.clusters]).then(([bills, clusters]) => {
-      renderListView(bills, clusters);
+    DATA.billsList.then(bills => {
+      renderListView(bills);
     }).catch(err => {
       showError(main, 'Could not load bill data. ' + err.message);
     });
   }
 
-  function renderListView(bills, clusters) {
+  function renderListView(bills) {
     const gcOptions = [...new Set(bills.map(b => b.general_court))].sort((a, b) => a - b);
-    const clusterOptions = clusters || [];
+    const categoryOptions = [...new Set(bills.flatMap(b => b.categories || []))].sort();
 
     const params = new URLSearchParams(location.search);
     let filterText = params.get('q') || '';
     let filterGcs = params.getAll('gc').map(Number).filter(Boolean);
-    let filterCluster = params.get('cluster') || '';
+    let filterCategory = params.get('cat') || '';
     let filterPosition = params.get('pos') || 'any';
     let filterPassed = params.get('passed') || 'all';
 
@@ -83,11 +84,12 @@
           </select>
         </div>
         <div class="filter-group">
-          <label for="f-cluster">Cluster</label>
-          <select id="f-cluster">
-            <option value="">All clusters</option>
-            ${clusterOptions.map(c => `<option value="${c.cluster_id}" ${filterCluster === String(c.cluster_id) ? 'selected' : ''}>${escHtml(c.label)}</option>`).join('')}
+          <label for="f-cat">Topic</label>
+          <select id="f-cat">
+            <option value="">All topics</option>
+            ${categoryOptions.map(c => `<option value="${escHtml(c)}" ${filterCategory === c ? 'selected' : ''}>${escHtml(c)}</option>`).join('')}
           </select>
+          <span class="filter-hint">AI-generated; ~75% of bills tagged. Untagged bills show "—".</span>
         </div>
         <div class="filter-group">
           <label for="f-pos">Position activity</label>
@@ -115,7 +117,7 @@
       { key: 'bill_id', label: 'Bill ID', render: row => `<a href="bills.html?id=${encodeURIComponent(row.bill_id)}&gc=${encodeURIComponent(row.general_court)}">${escHtml(row.bill_id)}</a>` },
       { key: 'bill_title', label: 'Title', className: 'truncate', render: row => escHtml(row.bill_title) },
       { key: 'general_court', label: 'GC', render: row => `<span class="chip chip-gc">GC${row.general_court}</span>`, className: 'hide-sm' },
-      { key: 'cluster_label', label: 'Cluster', className: 'hide-sm', render: row => row.cluster_label ? `<span class="chip chip-cluster">${escHtml(row.cluster_label)}</span>` : '—' },
+      { key: 'categories', label: 'Topic', className: 'hide-sm', render: row => (row.categories && row.categories.length) ? row.categories.map(c => `<span class="chip chip-category">${escHtml(c)}</span>`).join(' ') : '—' },
       {
         key: 'clients',
         label: 'Clients',
@@ -137,7 +139,7 @@
       let rows = bills;
       if (filterText) rows = fuzzyFilter(rows, filterText, ['bill_title', 'bill_id']);
       if (filterGcs.length) rows = rows.filter(b => filterGcs.includes(b.general_court));
-      if (filterCluster !== '') rows = rows.filter(b => String(b.cluster_id) === filterCluster);
+      if (filterCategory !== '') rows = rows.filter(b => (b.categories || []).includes(filterCategory));
       if (filterPosition === 'supporters') rows = rows.filter(b => (b.n_supporters || 0) > 0);
       else if (filterPosition === 'opposers') rows = rows.filter(b => (b.n_opposers || 0) > 0);
       else if (filterPosition === 'contested') rows = rows.filter(b => (b.n_supporters || 0) > 0 && (b.n_opposers || 0) > 0);
@@ -151,7 +153,7 @@
       const p = new URLSearchParams();
       if (filterText) p.set('q', filterText);
       filterGcs.forEach(gc => p.append('gc', gc));
-      if (filterCluster) p.set('cluster', filterCluster);
+      if (filterCategory) p.set('cat', filterCategory);
       if (filterPosition !== 'any') p.set('pos', filterPosition);
       if (filterPassed !== 'all') p.set('passed', filterPassed);
       history.replaceState(null, '', p.toString() ? '?' + p.toString() : location.pathname);
@@ -180,8 +182,8 @@
       onFilterChange();
     });
 
-    document.getElementById('f-cluster').addEventListener('change', e => {
-      filterCluster = e.target.value; onFilterChange();
+    document.getElementById('f-cat').addEventListener('change', e => {
+      filterCategory = e.target.value; onFilterChange();
     });
 
     document.getElementById('f-pos').addEventListener('change', e => {
@@ -229,12 +231,13 @@
     const categories = bill.categories || [];
     const tags = bill.tags || [];
 
+    const noTaxonomy = !categories.length && !tags.length;
     const chipsHtml = [
       `<span class="chip chip-gc">GC${gc}</span>`,
-      bill.cluster_label ? `<span class="chip chip-cluster">${escHtml(bill.cluster_label)}</span>` : '',
       passedBadge(bill.passed),
-      ...categories.map(c => `<span class="chip chip-category">${escHtml(c)}</span>`),
-      ...tags.map(t => `<span class="chip chip-tag">${escHtml(t)}</span>`),
+      ...categories.map(c => categoryChip(c)),
+      ...tags.map(t => tagChip(t)),
+      noTaxonomy ? `<span class="no-taxonomy-note">Topic tags not yet available for this bill.</span>` : '',
     ].filter(Boolean).join('');
 
     const summary = bill.summary;
@@ -264,7 +267,9 @@
       <div class="see-also-item">
         <span class="sa-id">${escHtml(b.bill_id)} GC${b.general_court}</span>
         <span class="sa-title"><a href="bills.html?id=${encodeURIComponent(b.bill_id)}&gc=${encodeURIComponent(b.general_court)}">${escHtml(b.bill_title)}</a></span>
-      </div>`).join('') : '<p class="no-data">No similar bills found.</p>';
+      </div>`).join('') : noTaxonomy
+        ? '<p class="no-data">Similar bills can\'t be shown because this bill hasn\'t been tagged yet.</p>'
+        : '<p class="no-data">No similar bills found.</p>';
 
     main.innerHTML = `
       <div class="breadcrumb"><a href="bills.html">← All bills</a></div>
@@ -308,7 +313,7 @@
 
       <h2>See also</h2>
       <p style="font-size:0.78rem;color:var(--muted);margin-bottom:0.5rem">
-        Bills scored by shared AI-assigned tags (weighted 2×) plus same cluster membership.
+        Bills scored by shared AI-assigned categories and tags.
       </p>
       <div class="see-also-list">${seeAlsoHtml}</div>
     `;
@@ -320,18 +325,19 @@
 
   function computeSeeAlso(bill, allBills, n) {
     const myTags = new Set(bill.tags || []);
-    const myCluster = bill.cluster_id;
+    const myCats = new Set(bill.categories || []);
     const myKey = `${bill.bill_id}_${bill.general_court}`;
 
-    if (!myTags.size && myCluster == null) return [];
+    if (!myTags.size && !myCats.size) return [];
 
     return allBills
       .filter(b => `${b.bill_id}_${b.general_court}` !== myKey)
       .map(b => {
         const bTags = new Set(b.tags || []);
+        const bCats = new Set(b.categories || []);
         const sharedTags = [...myTags].filter(t => bTags.has(t)).length;
-        const sameCluster = myCluster != null && b.cluster_id === myCluster ? 1 : 0;
-        return { b, score: sharedTags * 2 + sameCluster };
+        const sharedCats = [...myCats].filter(c => bCats.has(c)).length;
+        return { b, score: sharedTags * 2 + sharedCats };
       })
       .filter(x => x.score > 0)
       .sort((a, b) => b.score - a.score)
