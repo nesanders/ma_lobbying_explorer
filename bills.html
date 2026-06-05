@@ -89,7 +89,7 @@
             <option value="">All topics</option>
             ${categoryOptions.map(c => `<option value="${escHtml(c)}" ${filterCategory === c ? 'selected' : ''}>${escHtml(c)}</option>`).join('')}
           </select>
-          <span class="filter-hint">AI-generated; ~75% of bills tagged. Untagged bills show "—".</span>
+          <span class="filter-hint">AI-generated topic tags; untagged bills show "—".</span>
         </div>
         <div class="filter-group">
           <label for="f-pos">Position activity</label>
