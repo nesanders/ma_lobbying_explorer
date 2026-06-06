@@ -66,48 +66,60 @@
     const params = new URLSearchParams(location.search);
     let filterText = params.get('q') || '';
     let filterGcs = params.getAll('gc').map(Number).filter(Boolean);
-    let filterCategory = params.get('cat') || '';
+    let filterCategories = params.getAll('cat');
     let filterPosition = params.get('pos') || 'any';
     let filterPassed = params.get('passed') || 'all';
+    let filterMinSup = Number(params.get('msup') || 0);
+    let filterMinOpp = Number(params.get('mopp') || 0);
 
     main.innerHTML = `
       <h1>Bills</h1>
-      <div class="filter-bar" id="filter-bar">
-        <div class="filter-group wide">
-          <label for="f-text">Search</label>
-          <input type="text" id="f-text" placeholder="Bill title or ID…" value="${escHtml(filterText)}">
+      <div class="filter-bar bills-filter-bar" id="filter-bar">
+        <div class="filter-row">
+          <div class="filter-group" style="flex:1">
+            <label for="f-text">Search</label>
+            <input type="text" id="f-text" placeholder="Bill title or ID…" value="${escHtml(filterText)}">
+          </div>
         </div>
-        <div class="filter-group">
-          <label for="f-gc">General Court</label>
-          <select id="f-gc" multiple size="3" style="height:auto">
-            ${gcOptions.map(gc => `<option value="${gc}" ${filterGcs.includes(gc) ? 'selected' : ''}>GC${gc}</option>`).join('')}
-          </select>
-        </div>
-        <div class="filter-group">
-          <label for="f-cat">Topic</label>
-          <select id="f-cat">
-            <option value="">All topics</option>
-            ${categoryOptions.map(c => `<option value="${escHtml(c)}" ${filterCategory === c ? 'selected' : ''}>${escHtml(c)}</option>`).join('')}
-          </select>
-          <span class="filter-hint">AI-generated topic tags; untagged bills show "—".</span>
-        </div>
-        <div class="filter-group">
-          <label for="f-pos">Position activity</label>
-          <select id="f-pos">
-            <option value="any" ${filterPosition === 'any' ? 'selected' : ''}>Any</option>
-            <option value="supporters" ${filterPosition === 'supporters' ? 'selected' : ''}>Has supporters</option>
-            <option value="opposers" ${filterPosition === 'opposers' ? 'selected' : ''}>Has opposers</option>
-            <option value="contested" ${filterPosition === 'contested' ? 'selected' : ''}>Contested</option>
-          </select>
-        </div>
-        <div class="filter-group">
-          <label for="f-passed">Passed</label>
-          <select id="f-passed">
-            <option value="all" ${filterPassed === 'all' ? 'selected' : ''}>All</option>
-            <option value="yes" ${filterPassed === 'yes' ? 'selected' : ''}>Passed</option>
-            <option value="no" ${filterPassed === 'no' ? 'selected' : ''}>Not passed</option>
-            <option value="unknown" ${filterPassed === 'unknown' ? 'selected' : ''}>Unknown</option>
-          </select>
+        <div class="filter-row">
+          <div class="filter-group filter-group-multi">
+            <label for="f-gc">General Court</label>
+            <select id="f-gc" multiple size="5" style="height:auto">
+              ${gcOptions.map(gc => `<option value="${gc}" ${filterGcs.includes(gc) ? 'selected' : ''}>GC${gc}</option>`).join('')}
+            </select>
+          </div>
+          <div class="filter-group filter-group-multi filter-group-topic">
+            <label for="f-cat">Topic</label>
+            <select id="f-cat" multiple size="5" style="height:auto">
+              ${categoryOptions.map(c => `<option value="${escHtml(c)}" ${filterCategories.includes(c) ? 'selected' : ''}>${escHtml(c)}</option>`).join('')}
+            </select>
+            <span class="filter-hint">AI-generated; untagged bills show "—".</span>
+          </div>
+          <div class="filter-group">
+            <label for="f-pos">Position activity</label>
+            <select id="f-pos">
+              <option value="any" ${filterPosition === 'any' ? 'selected' : ''}>Any</option>
+              <option value="supporters" ${filterPosition === 'supporters' ? 'selected' : ''}>Has supporters</option>
+              <option value="opposers" ${filterPosition === 'opposers' ? 'selected' : ''}>Has opposers</option>
+              <option value="contested" ${filterPosition === 'contested' ? 'selected' : ''}>Contested</option>
+            </select>
+          </div>
+          <div class="filter-group">
+            <label>Min positions</label>
+            <div style="display:flex;gap:0.4rem">
+              <input type="number" id="f-min-sup" min="0" step="1" placeholder="Sup ≥" value="${filterMinSup || ''}" style="width:5.5rem">
+              <input type="number" id="f-min-opp" min="0" step="1" placeholder="Opp ≥" value="${filterMinOpp || ''}" style="width:5.5rem">
+            </div>
+          </div>
+          <div class="filter-group">
+            <label for="f-passed">Passed</label>
+            <select id="f-passed">
+              <option value="all" ${filterPassed === 'all' ? 'selected' : ''}>All</option>
+              <option value="yes" ${filterPassed === 'yes' ? 'selected' : ''}>Passed</option>
+              <option value="no" ${filterPassed === 'no' ? 'selected' : ''}>Not passed</option>
+              <option value="unknown" ${filterPassed === 'unknown' ? 'selected' : ''}>Unknown</option>
+            </select>
+          </div>
         </div>
       </div>
       <div id="table-container"></div>
@@ -126,10 +138,17 @@
         className: 'num',
       },
       {
-        key: 'sup_opp',
-        label: 'Sup/Opp',
-        sortVal: row => (row.n_supporters || 0) + (row.n_opposers || 0),
-        render: row => `<span style="color:#16a34a">${row.n_supporters || 0}</span> / <span style="color:#dc2626">${row.n_opposers || 0}</span>`,
+        key: 'n_supporters',
+        label: 'Support',
+        sortVal: row => row.n_supporters || 0,
+        render: row => `<span style="color:#16a34a">${row.n_supporters || 0}</span>`,
+        className: 'num',
+      },
+      {
+        key: 'n_opposers',
+        label: 'Oppose',
+        sortVal: row => row.n_opposers || 0,
+        render: row => `<span style="color:#dc2626">${row.n_opposers || 0}</span>`,
         className: 'num',
       },
       { key: 'passed', label: 'Passed', render: row => passedBadge(row.passed), className: 'hide-sm' },
@@ -139,10 +158,12 @@
       let rows = bills;
       if (filterText) rows = fuzzyFilter(rows, filterText, ['bill_title', 'bill_id']);
       if (filterGcs.length) rows = rows.filter(b => filterGcs.includes(b.general_court));
-      if (filterCategory !== '') rows = rows.filter(b => (b.categories || []).includes(filterCategory));
+      if (filterCategories.length) rows = rows.filter(b => filterCategories.every(cat => (b.categories || []).includes(cat)));
       if (filterPosition === 'supporters') rows = rows.filter(b => (b.n_supporters || 0) > 0);
       else if (filterPosition === 'opposers') rows = rows.filter(b => (b.n_opposers || 0) > 0);
       else if (filterPosition === 'contested') rows = rows.filter(b => (b.n_supporters || 0) > 0 && (b.n_opposers || 0) > 0);
+      if (filterMinSup > 0) rows = rows.filter(b => (b.n_supporters || 0) >= filterMinSup);
+      if (filterMinOpp > 0) rows = rows.filter(b => (b.n_opposers || 0) >= filterMinOpp);
       if (filterPassed === 'yes') rows = rows.filter(b => b.passed === true || b.passed === 1);
       else if (filterPassed === 'no') rows = rows.filter(b => b.passed === false || b.passed === 0);
       else if (filterPassed === 'unknown') rows = rows.filter(b => b.passed == null);
@@ -153,16 +174,17 @@
       const p = new URLSearchParams();
       if (filterText) p.set('q', filterText);
       filterGcs.forEach(gc => p.append('gc', gc));
-      if (filterCategory) p.set('cat', filterCategory);
+      filterCategories.forEach(cat => p.append('cat', cat));
       if (filterPosition !== 'any') p.set('pos', filterPosition);
+      if (filterMinSup > 0) p.set('msup', filterMinSup);
+      if (filterMinOpp > 0) p.set('mopp', filterMinOpp);
       if (filterPassed !== 'all') p.set('passed', filterPassed);
       history.replaceState(null, '', p.toString() ? '?' + p.toString() : location.pathname);
     }
 
     const container = document.getElementById('table-container');
-    const defaultRows = [...bills].sort((a, b) => ((b.n_supporters || 0) + (b.n_opposers || 0)) - ((a.n_supporters || 0) + (a.n_opposers || 0)));
     const table = renderTable(container, columns, applyFilters(), {
-      defaultSortCol: 'sup_opp',
+      defaultSortCol: 'n_supporters',
       defaultSortDir: 'desc',
     });
 
@@ -183,11 +205,22 @@
     });
 
     document.getElementById('f-cat').addEventListener('change', e => {
-      filterCategory = e.target.value; onFilterChange();
+      filterCategories = [...e.target.selectedOptions].map(o => o.value);
+      onFilterChange();
     });
 
     document.getElementById('f-pos').addEventListener('change', e => {
       filterPosition = e.target.value; onFilterChange();
+    });
+
+    let minSupTimer, minOppTimer;
+    document.getElementById('f-min-sup').addEventListener('input', e => {
+      clearTimeout(minSupTimer);
+      minSupTimer = setTimeout(() => { filterMinSup = Number(e.target.value) || 0; onFilterChange(); }, 300);
+    });
+    document.getElementById('f-min-opp').addEventListener('input', e => {
+      clearTimeout(minOppTimer);
+      minOppTimer = setTimeout(() => { filterMinOpp = Number(e.target.value) || 0; onFilterChange(); }, 300);
     });
 
     document.getElementById('f-passed').addEventListener('change', e => {

@@ -233,6 +233,12 @@ h3 { font-size: 1rem; font-weight: 600; margin: 1rem 0 0.5rem; }
 .filter-group.wide { min-width: 220px; }
 .filter-hint { font-size: 0.72rem; color: var(--muted); font-style: italic; }
 
+.bills-filter-bar { flex-direction: column; align-items: stretch; gap: 0.75rem; }
+.filter-row { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: flex-start; }
+.filter-group-multi { min-width: 160px; }
+.filter-group-multi select { min-height: 7rem; }
+.filter-group-topic { flex: 1; min-width: 200px; }
+
 .toggle-label {
   display: flex;
   align-items: center;
@@ -477,6 +483,8 @@ blockquote.no-summary { border-color: var(--border); background: var(--bg); colo
   .filter-bar { flex-direction: column; gap: 0.5rem; }
   .filter-group { min-width: unset; width: 100%; }
   .filter-group.wide { min-width: unset; width: 100%; }
+  .filter-row { flex-direction: column; }
+  .filter-group-multi, .filter-group-topic { min-width: unset; width: 100%; flex: unset; }
   .stat-grid { grid-template-columns: repeat(2, 1fr); }
   .nav-cards { grid-template-columns: 1fr; }
   thead th.hide-sm, tbody td.hide-sm { display: none; }

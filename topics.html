@@ -211,9 +211,9 @@
       { key: 'bill_title', label: 'Title', className: 'truncate', render: row => escHtml(row.bill_title || '') },
       { key: 'general_court', label: 'GC', render: row => `<span class="chip chip-gc">GC${row.general_court}</span>`, className: 'hide-sm' },
       {
-        key: 'sup_opp',
+        key: 'n_supporters',
         label: 'Sup/Opp',
-        sortVal: row => (row.n_supporters || 0) + (row.n_opposers || 0),
+        sortVal: row => row.n_supporters || 0,
         render: row => `<span style="color:#16a34a">${row.n_supporters || 0}</span> / <span style="color:#dc2626">${row.n_opposers || 0}</span>`,
         className: 'num',
       },
@@ -221,7 +221,7 @@
 
     const billsContainer = document.getElementById('bills-table');
     const billTable = renderTable(billsContainer, billColumns, applyBillFilters(), {
-      defaultSortCol: 'sup_opp',
+      defaultSortCol: 'n_supporters',
       defaultSortDir: 'desc',
     });
 
