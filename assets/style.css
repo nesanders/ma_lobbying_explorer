@@ -380,6 +380,13 @@ tbody td.truncate { max-width: 280px; white-space: nowrap; overflow: hidden; tex
 }
 .ext-link-btn:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.15); text-decoration: none; }
 .ext-link-btn:visited { color: var(--link); }
+.sos-note {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 1.1rem; height: 1.1rem; border-radius: 50%;
+  background: var(--border); color: var(--muted);
+  font-size: 0.7rem; font-weight: 700; cursor: help;
+  flex-shrink: 0;
+}
 
 blockquote {
   border-left: 3px solid var(--accent);

@@ -18,12 +18,11 @@ DB schema (as of 2026-06-02):
                             bill_id = bill_prefix + bill_number (NULL for non-standard chambers)
                             position values: 'Support', 'Oppose', 'Neutral', null
   MA_Lobbying_Bills_Scored: bill_id, bill_number, general_court, bill_title,
-                            env_relevance_score, is_environmental, cluster_id
+                            env_relevance_score, is_environmental
                             deduplicated on (bill_id, general_court)
   MA_Lobbying_Employers:    entity_name, client_name, year, reg_type, compensation
   MA_Legislature_Bills:     bill_id, bill_number, bill_prefix, general_court, title,
                             sponsor_name, status, passed
-  MA_Bill_Cluster_Labels:   cluster_id, label, n_bills, n_env_bills
   Parquet:                  bill_id, general_court, is_env_llm, env_relevance_score,
                             summary, categories, tags
 
@@ -123,22 +122,13 @@ def load_parquet(parquet_path: Path) -> pd.DataFrame:
     return df
 
 
-def export_clusters(engine, out_dir: Path):
-    print('Exporting clusters.json…')
-    df = pd.read_sql('SELECT cluster_id, label, n_bills, n_env_bills FROM MA_Bill_Cluster_Labels', engine)
-    df = df.where(pd.notnull(df), None)
-    write_json(out_dir / 'clusters.json', df.to_dict(orient='records'), 'clusters')
-
-
 def _load_scored_base(engine) -> pd.DataFrame:
-    """Load MA_Lobbying_Bills_Scored joined with cluster labels and passed status."""
+    """Load MA_Lobbying_Bills_Scored joined with passed status."""
     return pd.read_sql("""
         SELECT s.bill_id, s.bill_number, s.general_court, s.bill_title,
-               s.env_relevance_score, s.is_environmental, s.cluster_id,
-               c.label AS cluster_label,
+               s.env_relevance_score, s.is_environmental,
                l.passed
         FROM MA_Lobbying_Bills_Scored s
-        LEFT JOIN MA_Bill_Cluster_Labels c ON s.cluster_id = c.cluster_id
         LEFT JOIN MA_Legislature_Bills l
                ON s.bill_id = l.bill_id AND s.general_court = l.general_court
     """, engine)
@@ -198,7 +188,7 @@ def export_bills_list(engine, parquet_df: pd.DataFrame, out_dir: Path) -> pd.Dat
     scored = _load_scored_base(engine)
     stubs = _load_unscored_stubs(engine)
     # Add stub-only columns so concat works cleanly
-    for col in ['env_relevance_score', 'is_environmental', 'cluster_id', 'cluster_label']:
+    for col in ['env_relevance_score', 'is_environmental']:
         stubs[col] = None
     scored = pd.concat([scored, stubs], ignore_index=True, sort=False)
 
@@ -262,7 +252,7 @@ def export_bills_detail(engine, parquet_df: pd.DataFrame, out_dir: Path):
     print('Exporting bills_detail.json…')
     scored = _load_scored_base(engine)
     stubs = _load_unscored_stubs(engine)
-    for col in ['env_relevance_score', 'is_environmental', 'cluster_id', 'cluster_label']:
+    for col in ['env_relevance_score', 'is_environmental']:
         stubs[col] = None
     scored = pd.concat([scored, stubs], ignore_index=True, sort=False)
 
@@ -652,7 +642,7 @@ def main():
 
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    export_clusters(engine, out_dir)
+
     export_bills_list(engine, parquet_df, out_dir)
     export_bills_detail(engine, parquet_df, out_dir)
     export_employers(engine, parquet_df, out_dir)
