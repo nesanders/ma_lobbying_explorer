@@ -39,6 +39,7 @@ from datetime import date
 from pathlib import Path
 
 import pandas as pd
+import sqlalchemy
 from sqlalchemy import create_engine
 
 SEP = (',', ':')
@@ -123,7 +124,20 @@ def load_parquet(parquet_path: Path) -> pd.DataFrame:
 
 
 def _load_scored_base(engine) -> pd.DataFrame:
-    """Load MA_Lobbying_Bills_Scored joined with passed status."""
+    """Load MA_Lobbying_Bills_Scored joined with passed status.
+
+    Returns an empty DataFrame if the table is absent from the database.
+    """
+    with engine.connect() as con:
+        tables = [r[0] for r in con.execute(
+            sqlalchemy.text("SELECT name FROM sqlite_master WHERE type='table'")
+        )]
+    if 'MA_Lobbying_Bills_Scored' not in tables:
+        print('  Warning: MA_Lobbying_Bills_Scored not found — skipping scored data.')
+        return pd.DataFrame(columns=[
+            'bill_id', 'bill_number', 'general_court', 'bill_title',
+            'env_relevance_score', 'is_environmental', 'passed',
+        ])
     return pd.read_sql("""
         SELECT s.bill_id, s.bill_number, s.general_court, s.bill_title,
                s.env_relevance_score, s.is_environmental,
