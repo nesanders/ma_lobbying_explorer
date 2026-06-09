@@ -122,25 +122,8 @@ def load_parquet(parquet_path: Path) -> pd.DataFrame:
     return df
 
 
-def _load_scored_base(engine) -> pd.DataFrame:
-    """Load MA_Lobbying_Bills_Scored joined with passed status."""
-    return pd.read_sql("""
-        SELECT s.bill_id, s.bill_number, s.general_court, s.bill_title,
-               s.env_relevance_score, s.is_environmental,
-               l.passed
-        FROM MA_Lobbying_Bills_Scored s
-        LEFT JOIN MA_Legislature_Bills l
-               ON s.bill_id = l.bill_id AND s.general_court = l.general_court
-    """, engine)
-
-
-def _load_unscored_stubs(engine) -> pd.DataFrame:
-    """Return stub rows for lobbied bills absent from MA_Lobbying_Bills_Scored.
-
-    These are bills recorded in the SoS lobbying data that were never run through
-    the AMEND scoring pipeline. They are shown without cluster, env score, or
-    summary but with correct title and passed status from MA_Legislature_Bills.
-    """
+def _load_lobbied_bills(engine) -> pd.DataFrame:
+    """Return all distinct lobbied bills with title and passed status."""
     return pd.read_sql("""
         SELECT DISTINCT
             lb.bill_id,
@@ -149,11 +132,9 @@ def _load_unscored_stubs(engine) -> pd.DataFrame:
             COALESCE(leg.title, lb.bill_title) AS bill_title,
             leg.passed
         FROM MA_Lobbying_Bills lb
-        LEFT JOIN MA_Lobbying_Bills_Scored s
-               ON lb.bill_id = s.bill_id AND lb.general_court = s.general_court
         LEFT JOIN MA_Legislature_Bills leg
                ON lb.bill_id = leg.bill_id AND lb.general_court = leg.general_court
-        WHERE lb.bill_id IS NOT NULL AND s.bill_id IS NULL
+        WHERE lb.bill_id IS NOT NULL
     """, engine)
 
 
@@ -185,15 +166,10 @@ def _load_position_counts(engine) -> pd.DataFrame:
 
 def export_bills_list(engine, parquet_df: pd.DataFrame, out_dir: Path) -> pd.DataFrame:
     print('Exporting bills_list.json…')
-    scored = _load_scored_base(engine)
-    stubs = _load_unscored_stubs(engine)
-    # Add stub-only columns so concat works cleanly
-    for col in ['env_relevance_score', 'is_environmental']:
-        stubs[col] = None
-    scored = pd.concat([scored, stubs], ignore_index=True, sort=False)
+    df = _load_lobbied_bills(engine)
 
     pos = _load_position_counts(engine)
-    df = scored.merge(pos, on=['bill_id', 'general_court'], how='left')
+    df = df.merge(pos, on=['bill_id', 'general_court'], how='left')
 
     for col in ['n_supporters', 'n_opposers', 'n_neutrals', 'n_no_position']:
         df[col] = df[col].fillna(0).astype(int)
@@ -203,18 +179,13 @@ def export_bills_list(engine, parquet_df: pd.DataFrame, out_dir: Path) -> pd.Dat
         for col in ('categories', 'tags'):
             if col in parquet_df.columns:
                 par_cols.append(col)
-        df = df.merge(
-            parquet_df[par_cols],
-            on=['bill_id', 'general_court'], how='left', suffixes=('', '_par')
-        )
-        if 'env_relevance_score_par' in df.columns:
-            df['env_relevance_score'] = df['env_relevance_score_par'].fillna(df['env_relevance_score'])
-            df.drop(columns=['env_relevance_score_par'], inplace=True)
+        df = df.merge(parquet_df[par_cols], on=['bill_id', 'general_court'], how='left')
     else:
         df['is_env_llm'] = False
+        df['env_relevance_score'] = 0.0
 
     df['is_env_llm'] = df.get('is_env_llm', False).fillna(False).astype(bool)
-    df['env_relevance_score'] = df['env_relevance_score'].fillna(0.0)
+    df['env_relevance_score'] = df.get('env_relevance_score', 0.0).fillna(0.0)
     df['passed'] = df['passed'].where(pd.notnull(df['passed']), None)
     df = df.where(pd.notnull(df), None)
 
@@ -250,33 +221,23 @@ def export_bills_list(engine, parquet_df: pd.DataFrame, out_dir: Path) -> pd.Dat
 
 def export_bills_detail(engine, parquet_df: pd.DataFrame, out_dir: Path):
     print('Exporting bills_detail.json…')
-    scored = _load_scored_base(engine)
-    stubs = _load_unscored_stubs(engine)
-    for col in ['env_relevance_score', 'is_environmental']:
-        stubs[col] = None
-    scored = pd.concat([scored, stubs], ignore_index=True, sort=False)
+    df = _load_lobbied_bills(engine)
 
     pos = _load_position_counts(engine)
-    df = scored.merge(pos, on=['bill_id', 'general_court'], how='left')
+    df = df.merge(pos, on=['bill_id', 'general_court'], how='left')
 
     for col in ['n_supporters', 'n_opposers', 'n_neutrals', 'n_no_position']:
         df[col] = df[col].fillna(0).astype(int)
 
     if len(parquet_df):
-        df = df.merge(parquet_df, on=['bill_id', 'general_court'], how='left',
-                      suffixes=('', '_par'))
-        for col in ['env_relevance_score', 'is_env_llm']:
-            par_col = col + '_par'
-            if par_col in df.columns:
-                df[col] = df[par_col].fillna(df[col])
-                df.drop(columns=[par_col], inplace=True)
+        df = df.merge(parquet_df, on=['bill_id', 'general_court'], how='left')
     else:
-        for col in ['is_env_llm', 'summary', 'categories', 'tags']:
+        for col in ['is_env_llm', 'env_relevance_score', 'summary', 'categories', 'tags']:
             if col not in df.columns:
                 df[col] = None
 
     df['is_env_llm'] = df.get('is_env_llm', False).fillna(False).astype(bool)
-    df['env_relevance_score'] = df['env_relevance_score'].fillna(0.0)
+    df['env_relevance_score'] = df.get('env_relevance_score', 0.0).fillna(0.0)
     df = df.where(pd.notnull(df), None)
 
     result = {}
